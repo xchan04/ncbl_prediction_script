@@ -5,15 +5,22 @@ __pycache__/
 .venv/
 venv/
 
-# Local data + generated media (don't commit the league sheet or renders)
+# Local data + generated media (never commit the league sheet or renders)
 *.xlsx
 *.xlsm
 *.csv
-_test*
-_smoke/
-out/
 *.mp4
-# keep example/config
+*.png
+*.jpg
+*.jpeg
+out/
+out_*/
+_smoke/
+_test*
+_demo*
+_season*
+
+# keep example config only
 !config.example.json
 
 # OS / editor

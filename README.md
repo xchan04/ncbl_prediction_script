@@ -146,5 +146,20 @@ Needs a free **Challonge API key** (challonge.com → Developer API); pass `--ap
 Harvest tournament ids from the sheet's links with `--from-sheet`, or list them via `--slugs`
 (org URLs like `ncbl.challonge.com/goonday` → id `ncbl-goonday`). Output: `<player>_h2h.{txt,json,html}`.
 
+Feed the same cache into the ranking report to annotate rivals with your record:
+```bash
+python -m ncbl report --input sheet.xlsx --player espiiii --h2h-cache challonge_cache/ --outdir out/
+```
+Only **genuine contenders** for your target rank are shown (a #82 player who can't reach the
+cutoff even sweeping is not highlighted); each carries your head-to-head (e.g. `NiceGuyEddie #18 · H2H 0-3`).
+
+## Seasonal vs lifetime
+The spreadsheet spans multiple seasons. Point-standings/predictions are inherently **per-season**
+(set `data_entry_sheet`/`rankings_sheet` to the season's tabs — best-6-of-10 is a seasonal rule).
+Event-based analyses scope with `--season`:
+- `coach --season "2026 Season 6"` limits reports to that season's date window; **omit it for lifetime** (all reports).
+- `challonge --season NAME` (and `report --h2h-cache … --season NAME`) filter head-to-head to that window; omit for lifetime.
+Season date windows live in config under `seasons`.
+
 ## License
 Personal project — © xchan04.

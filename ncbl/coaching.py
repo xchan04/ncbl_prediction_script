@@ -46,6 +46,32 @@ def _players(reports):
     return sorted({str(r["player"]).lower() for r in reports if r.get("player")})
 
 
+def filter_by_season(reports, season, seasons_cfg):
+    """Keep only reports whose date falls in the named season's window (lifetime if season is None)."""
+    if not season or not seasons_cfg or season not in seasons_cfg:
+        return reports
+    lo, hi = seasons_cfg[season]
+    kept = []
+    for r in reports:
+        d = _date_iso(r.get("date"))
+        if d is None or lo <= d <= hi:
+            kept.append(r)
+    return kept
+
+
+def _date_iso(date_str):
+    """'June 28, 2026' -> '2026-06-28' (best-effort)."""
+    if not date_str:
+        return None
+    import datetime
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime(date_str.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
 def _resolve(reports, name):
     lc = name.strip().lower()
     for r in reports:

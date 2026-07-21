@@ -83,6 +83,13 @@ DEFAULTS = {
         "cutoff": "#ff5555", "amber": "#ffd24a", "dim": "#1c1c1c",
     },
     "target_rank": 10,   # the rank you're chasing
+
+    # season date windows (used to scope coaching / head-to-head to one season vs lifetime)
+    "seasons": {
+        "2026 Season 5": ["2026-01-01", "2026-04-30"],
+        "2026 Season 6": ["2026-05-01", "2026-08-31"],
+        "2026 Season 7": ["2026-09-01", "2026-12-31"],
+    },
 }
 
 

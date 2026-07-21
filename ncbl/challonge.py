@@ -91,6 +91,35 @@ def _norm(name):
     return re.sub(r"\s+", "", str(name)).lower()
 
 
+def load_cache(cache_dir, season=None, seasons_cfg=None):
+    """Load all cached tournament JSON in a dir -> list of parse_tournament dicts.
+    Optionally keep only tournaments inside a named season's date window."""
+    import glob
+    out = []
+    for f in sorted(glob.glob(os.path.join(cache_dir, "*.json"))):
+        try:
+            with open(f) as fh:
+                t = parse_tournament(json.load(fh))
+        except Exception:
+            continue
+        if season and seasons_cfg and not _in_season(_tournament_date(json.load(open(f))), season, seasons_cfg):
+            continue
+        out.append(t)
+    return out
+
+
+def _tournament_date(data):
+    t = data.get("tournament", data)
+    return (t.get("started_at") or t.get("created_at") or "")[:10]
+
+
+def _in_season(date_str, season, seasons_cfg):
+    win = seasons_cfg.get(season)
+    if not win or not date_str:
+        return True
+    return win[0] <= date_str <= win[1]
+
+
 # ---------------- head-to-head ----------------
 def head_to_head(tournaments, player):
     """Aggregate a player's record vs each opponent across tournaments.

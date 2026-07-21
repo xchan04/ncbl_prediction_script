@@ -101,12 +101,21 @@ def cmd_threats(args):
 def cmd_report(args):
     cfg, league = _load(args)
     player = _pkey(league, args.player)
+    h2h = None
+    if args.h2h_cache and os.path.isdir(args.h2h_cache):
+        seasons = cfg.get("seasons") or {}
+        tours = CH.load_cache(args.h2h_cache, season=args.season, seasons_cfg=seasons)
+        if tours:
+            h2h = CH.head_to_head(tours, league.name(player))
     data = R.build(league, cfg, player, target_rank=args.target,
-                   remaining=args.remaining, window=args.window, top=args.top or 25)
+                   remaining=args.remaining, window=args.window, top=args.top or 25, h2h=h2h)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, args.name or _slug(data["player"]) + "_report")
     paths = R.write_all(data, cfg, base)
     print(R.to_txt(data))
+    if h2h:
+        print(f"[head-to-head from Challonge cache: {args.h2h_cache}"
+              + (f" · season {args.season}" if args.season else " · lifetime") + "]")
     print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
 
 
@@ -120,6 +129,13 @@ def cmd_coach(args):
     if not reports:
         raise SystemExit("error: no NCBLAST report PDFs could be read from --reports.\n"
                          "Pass a folder of report .pdf files or one/more file paths.")
+    scope = "lifetime"
+    if args.season:
+        reports = CO.filter_by_season(reports, args.season, cfg.get("seasons") or {})
+        scope = args.season
+        if not reports:
+            raise SystemExit(f"error: no reports fall within season '{args.season}'. "
+                             "Check config 'seasons' windows or omit --season for lifetime.")
     players = sorted({str(r["player"]).lower() for r in reports if r.get("player")})
     if not args.player:
         raise SystemExit("error: --player is required. Reports contain: " + ", ".join(players))
@@ -133,7 +149,7 @@ def cmd_coach(args):
     except Exception as ex:
         print("(visual skipped:", ex, ")")
     print(CO.coach_txt(res))
-    print(f"[{len(reports)} report(s) loaded · confidence {res['confidence']['tier']}]")
+    print(f"[{len(reports)} report(s) · scope: {scope} · confidence {res['confidence']['tier']}]")
     print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
 
 
@@ -145,10 +161,14 @@ def cmd_challonge(args):
     if not slugs:
         raise SystemExit("error: give --slugs ncbl-goonday ... or --from-sheet sheet.xlsx to harvest links.")
     api_key = args.api_key or os.environ.get("CHALLONGE_API_KEY")
+    seasons = cfg.get("seasons") or {}
     tournaments, missed = [], []
     for s in slugs:
         try:
-            tournaments.append(CH.parse_tournament(CH.fetch(s, api_key, args.cache)))
+            data = CH.fetch(s, api_key, args.cache)
+            if args.season and not CH._in_season(CH._tournament_date(data), args.season, seasons):
+                continue
+            tournaments.append(CH.parse_tournament(data))
         except Exception as ex:
             missed.append(f"{s}: {ex}")
     if not tournaments:
@@ -253,6 +273,9 @@ def main(argv=None):
     p.add_argument("--remaining", type=int, metavar="N")
     p.add_argument("--window", type=int, default=6, metavar="N", help="recent-events window for threats (default 6)")
     p.add_argument("--top", type=int, metavar="N", help="standings rows to include (default 25)")
+    p.add_argument("--h2h-cache", dest="h2h_cache", metavar="DIR",
+                   help="Challonge cache dir; annotates rivals with your head-to-head record")
+    p.add_argument("--season", metavar="NAME", help="scope head-to-head to a season window (default: lifetime)")
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("threats", help="who overtook the player / who can still catch them")
@@ -281,6 +304,7 @@ def main(argv=None):
     p.add_argument("--player", help="player to coach (any casing); reports list their player")
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
+    p.add_argument("--season", metavar="NAME", help="scope to a season window (default: lifetime = all reports)")
     p.set_defaults(func=cmd_coach)
 
     p = sub.add_parser("challonge", help="head-to-head records from Challonge brackets (needs a free API key)")
@@ -289,6 +313,7 @@ def main(argv=None):
     p.add_argument("--from-sheet", dest="from_sheet", metavar="PATH", help="harvest Challonge links from a Data-Entry sheet")
     p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")
     p.add_argument("--cache", default="challonge_cache", metavar="DIR", help="JSON cache dir (enables offline reruns)")
+    p.add_argument("--season", metavar="NAME", help="scope to a season window (default: lifetime)")
     p.add_argument("--config", metavar="FILE"); p.add_argument("--outdir", default="out", metavar="DIR")
     p.set_defaults(func=cmd_challonge)
 

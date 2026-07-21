@@ -12,12 +12,24 @@ from . import standings as S
 from . import simulate as SIM
 
 
-def build(league, cfg, player_lc, target_rank=None, remaining=None, window=6, top=25):
-    """Assemble the full JSON-serializable report for one player."""
+def build(league, cfg, player_lc, target_rank=None, remaining=None, window=6, top=25, h2h=None):
+    """Assemble the full JSON-serializable report for one player.
+
+    h2h (optional): list of {opponent, wins, losses, ...} from challonge.head_to_head —
+    annotates the rival threats with your lifetime/seasonal head-to-head record."""
     rep = SIM.predict_report(league, cfg, player_lc, target_rank=target_rank, remaining=remaining)
     thr = SIM.threats(league, cfg, player_lc, window=window)
     rows = S.standings(league, include=player_lc)
     stage = int(cfg.get("open_spots", 0) or 0)
+    h2h_by = {}
+    for h in (h2h or []):
+        h2h_by[_normname(h["opponent"])] = h
+
+    def _h2h(name):
+        h = h2h_by.get(_normname(name))
+        return {"record": f"{h['wins']}-{h['losses']}", "wins": h["wins"], "losses": h["losses"],
+                "win_pct": h["win_pct"]} if h else None
+
     return {
         "player": rep["player"],
         "current_rank": rep["current_rank"],
@@ -29,21 +41,27 @@ def build(league, cfg, player_lc, target_rank=None, remaining=None, window=6, to
         "open_spots": stage,
         "field_size": len(rows),
         "window": window,
+        "has_h2h": bool(h2h_by),
         "predictions": [
             {"strategy": label, "total": r["score"], "p_top": r["p_top"],
              "p_stage": r["p_stage"], "median_rank": r["median_rank"]}
             for label, r in rep["lines"]
         ],
         "threats": {
-            "overtook": [{"player": league.name(p), "from_rank": a, "to_rank": b, "score": round(s, 3)}
-                         for p, a, b, s in thr["overtook"]],
-            "live": [{"player": league.name(p), "rank": b, "score": round(s, 3), "slots_left": sl}
-                     for p, b, sl, s in thr["live"]],
+            "overtook": [{"player": league.name(p), "from_rank": a, "to_rank": b, "score": round(s, 3),
+                          "h2h": _h2h(league.name(p))} for p, a, b, s in thr["overtook"]],
+            "live": [{"player": league.name(p), "rank": b, "score": round(s, 3), "slots_left": sl,
+                      "h2h": _h2h(league.name(p))} for p, b, sl, s in thr["live"]],
         },
         "standings": [{"rank": i, "player": league.name(p), "score": round(s, 3),
                        "events": league.n_events(_key(league, p))}
                       for i, (p, s) in enumerate(rows[:top], 1)],
     }
+
+
+def _normname(name):
+    import re
+    return re.sub(r"\s+", "", str(name)).lower()
 
 
 def _key(league, name):
@@ -73,11 +91,13 @@ def to_txt(d):
     L.append("")
     L.append(f"=== Overtook {d['player']} (last {d['window']} events) ===")
     for o in d["threats"]["overtook"]:
-        L.append(f"  {o['player']:18} #{o['from_rank']} -> #{o['to_rank']}   {o['score']:.2f}")
+        h = f"   H2H {o['h2h']['record']}" if o.get("h2h") else ""
+        L.append(f"  {o['player']:18} #{o['from_rank']} -> #{o['to_rank']}   {o['score']:.2f}{h}")
     L.append("")
-    L.append("=== Live threats (below, still have slots) ===")
+    L.append("=== Rivals who can still catch you (direct contest) ===")
     for t in d["threats"]["live"]:
-        L.append(f"  {t['player']:18} #{t['rank']}  {t['score']:.2f}  ({t['slots_left']} slots left)")
+        h = f"   H2H {t['h2h']['record']}" if t.get("h2h") else ""
+        L.append(f"  {t['player']:18} #{t['rank']}  {t['score']:.2f}  ({t['slots_left']} slots left){h}")
     L.append("")
     L.append(f"=== Standings (top {len(d['standings'])}) ===")
     for s in d["standings"]:
@@ -113,19 +133,26 @@ def to_html(d, cfg):
         )
     spot_h = f'<th style="text-align:right">P(spot)</th>' if stage else ""
 
+    def _h2h_cell(x):
+        h = x.get("h2h")
+        if not h:
+            return f'<td style="text-align:right;color:{muted}">—</td>'
+        col = green if h["wins"] >= h["losses"] else red
+        return f'<td style="text-align:right;color:{col}">{h["record"]}</td>'
+
     over_rows = "".join(
         f'<tr><td>{e(o["player"])}</td>'
         f'<td style="text-align:right;color:{muted}">#{o["from_rank"]}</td>'
         f'<td style="text-align:center;color:{green}">&#8594; #{o["to_rank"]}</td>'
-        f'<td style="text-align:right">{o["score"]:.2f}</td></tr>'
-        for o in d["threats"]["overtook"]) or f'<tr><td colspan="4" style="color:{muted}">none</td></tr>'
+        f'<td style="text-align:right">{o["score"]:.2f}</td>{_h2h_cell(o)}</tr>'
+        for o in d["threats"]["overtook"]) or f'<tr><td colspan="5" style="color:{muted}">none</td></tr>'
 
     live_rows = "".join(
         f'<tr><td>{e(t["player"])}</td>'
         f'<td style="text-align:right;color:{muted}">#{t["rank"]}</td>'
         f'<td style="text-align:right">{t["score"]:.2f}</td>'
-        f'<td style="text-align:right;color:{orange}">{t["slots_left"]} left</td></tr>'
-        for t in d["threats"]["live"]) or f'<tr><td colspan="4" style="color:{muted}">none</td></tr>'
+        f'<td style="text-align:right;color:{orange}">{t["slots_left"]} left</td>{_h2h_cell(t)}</tr>'
+        for t in d["threats"]["live"]) or f'<tr><td colspan="5" style="color:{muted}">none</td></tr>'
 
     stand_rows = ""
     for s in d["standings"]:

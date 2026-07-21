@@ -36,3 +36,20 @@ def test_write_all_creates_three_files(league, cfg, tmp_path):
     assert exts == ["html", "json", "txt"]
     for p in paths:
         assert (tmp_path / p.split("/")[-1]).exists()
+
+
+def test_h2h_annotation_wires_in(league, cfg):
+    h2h = [{"opponent": "Bea", "wins": 1, "losses": 4, "win_pct": 20.0}]
+    d = R.build(league, cfg, "espiiii", target_rank=3, remaining=2, h2h=h2h)
+    assert d["has_h2h"] is True
+    # any rival matching the h2h name carries the record; non-matches stay None
+    all_rivals = d["threats"]["overtook"] + d["threats"]["live"]
+    for r in all_rivals:
+        if r["player"].lower() == "bea":
+            assert r["h2h"]["record"] == "1-4"
+
+
+def test_no_h2h_is_graceful(league, cfg):
+    d = R.build(league, cfg, "espiiii", target_rank=3, remaining=2)
+    assert d["has_h2h"] is False
+    assert all(r["h2h"] is None for r in d["threats"]["live"])

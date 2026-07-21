@@ -46,6 +46,11 @@ python -m ncbl threats  --input sheet.xlsx --player espiiii --window 6
 # Packaged report for a player -> .txt + .json + styled .html (black/orange)
 python -m ncbl report   --input sheet.xlsx --player espiiii --outdir out/
 
+# COACH: analyze NCBLAST match-report PDFs -> weaknesses / what-to-run / matchup swaps
+# Accepts a folder or any number of PDFs. More reports = higher confidence + deeper analysis.
+python -m ncbl coach    --reports Downloads/ --player espiiii --outdir out/
+python -m ncbl coach    --reports rfv.pdf mpp.pdf rdc.pdf --player espiiii --outdir out/
+
 # One video: follow | overview | montecarlo | map | hook
 python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4 --published-end
 python -m ncbl video hook   --input sheet.xlsx --out out/hook.mp4 --top-number 14 --drop-number 21
@@ -107,11 +112,25 @@ ncbl/
   standings.py   standings, ranks, snapshots, cutoff
   simulate.py    Monte-Carlo engine + predict/threats reports
   report.py      package a player report as .txt / .json / .html
-  viz.py         all video/chart generators
+  ncblast_parser.py  parse an NCBLAST match-report PDF -> structured dict
+  coaching.py    aggregate N reports -> weaknesses / meta / swaps (+ txt/json/html)
+  viz.py         all video/chart generators (+ coaching matchup chart)
   cli.py         argparse CLI  (python -m ncbl ...)
 config.example.json
 requirements.txt
 ```
+
+## Coach mode — robust to how much data you have
+`coach` ingests **any number** of NCBLAST report PDFs (a folder or a list) and gets
+**more comprehensive the more you feed it** — an explicit incentive to collect reports:
+- Every finding is **data-driven** (traceable to the report numbers) — no AI at runtime,
+  no external part database.
+- Sample sizes accumulate across reports, so findings graduate *tentative → likely →
+  confirmed*, and a **confidence tier** (Bronze/Silver/Gold) gates the deeper sections.
+- With ≥2 events, **cross-event signal** unlocks (per-combo trends, a widened meta).
+- **Degrades gracefully**: works from a single report, tolerates missing/garbled sections
+  (each PDF section parses independently), and older/letter-spaced report layouts
+  partial-parse rather than failing. More/other players' reports simply widen the meta.
 
 ## License
 Personal project — © xchan04.

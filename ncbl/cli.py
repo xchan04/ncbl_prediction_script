@@ -27,6 +27,7 @@ from . import standings as S
 from . import simulate as SIM
 from . import viz
 from . import report as R
+from . import coaching as CO
 
 
 def _load(args):
@@ -112,6 +113,29 @@ def _slug(name):
     return "".join(c if c.isalnum() else "_" for c in name).strip("_").lower()
 
 
+def cmd_coach(args):
+    cfg = load_config(args.config)
+    reports = CO.load_reports(args.reports)
+    if not reports:
+        raise SystemExit("error: no NCBLAST report PDFs could be read from --reports.\n"
+                         "Pass a folder of report .pdf files or one/more file paths.")
+    players = sorted({str(r["player"]).lower() for r in reports if r.get("player")})
+    if not args.player:
+        raise SystemExit("error: --player is required. Reports contain: " + ", ".join(players))
+    res = CO.coach(reports, args.player)
+    os.makedirs(args.outdir, exist_ok=True)
+    base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
+    paths = CO.write_all(res, cfg, base)
+    try:
+        viz.matchup_chart(res, cfg, base + "_matchups.png")
+        paths.append(base + "_matchups.png")
+    except Exception as ex:
+        print("(visual skipped:", ex, ")")
+    print(CO.coach_txt(res))
+    print(f"[{len(reports)} report(s) loaded · confidence {res['confidence']['tier']}]")
+    print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
+
+
 def cmd_video(args):
     cfg, league = _load(args)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -162,6 +186,7 @@ examples:
   python -m ncbl threats   --input sheet.xlsx --player espiiii
   python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4
   python -m ncbl all       --input sheet.xlsx --player espiiii --outdir out/
+  python -m ncbl coach     --reports Downloads/ --player espiiii --outdir out/
 
 --input accepts: the whole workbook .xlsx, a Data-Entry .csv, or a folder of the CSVs.
 Copy config.example.json -> config.json to set the season tabs, schedule, and invite lists.
@@ -172,7 +197,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="ncbl", description="NCBL ranking prediction + video pipeline",
         epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,threats,video,all}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,coach,threats,video,all}")
 
     def common(p):
         p.add_argument("--input", required=True, metavar="PATH",
@@ -220,6 +245,14 @@ def main(argv=None):
     common(p); p.add_argument("--player", required=True); p.add_argument("--outdir", default="out", metavar="DIR")
     p.add_argument("--target", type=int, metavar="RANK"); p.add_argument("--remaining", type=int, metavar="N")
     p.set_defaults(func=cmd_all)
+
+    p = sub.add_parser("coach", help="analyze NCBLAST match-report PDFs -> coaching report + visual")
+    p.add_argument("--reports", required=True, nargs="+", metavar="PATH",
+                   help="a folder of NCBLAST report PDFs, or one/more PDF paths (more = higher confidence)")
+    p.add_argument("--player", help="player to coach (any casing); reports list their player")
+    p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
+    p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
+    p.set_defaults(func=cmd_coach)
 
     args = ap.parse_args(argv)
     if not args.cmd:

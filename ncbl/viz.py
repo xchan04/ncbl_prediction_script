@@ -265,3 +265,46 @@ def vertical_hook(cfg, out, top_number, drop_number, fps=30, dur=6.0,
             ax.text(0.5,0.07,"FULL STORY ↓",color=th["fg"],fontsize=32,fontweight="bold",ha="center",va="center",alpha=e)
     animation.FuncAnimation(fig, draw, frames=N, interval=1000/fps).save(out, writer=_writer(fps), savefig_kwargs={"facecolor": th["bg"]})
     plt.close(); return out
+
+
+def matchup_chart(coach_result, cfg, out, top=12):
+    """Data-driven matchup profile: your net record vs the most-faced opponent combos,
+    plus a finish-vulnerability bar. Static PNG in the theme colors."""
+    th = cfg["theme"]; green = "#57e26b"; red = th["cutoff"]; orange = th["player"]
+    opp = coach_result.get("matchups_opp", {})
+    rows = []
+    for name, wl in opp.items():
+        w, l = (wl if isinstance(wl, (list, tuple)) else (wl[0], wl[1]))
+        if w + l >= 3:
+            rows.append((name, w, l, w - l))
+    rows.sort(key=lambda z: z[3])
+    rows = rows[:top] if len(rows) > top else rows
+    loss = coach_result.get("loss_finishes", {})
+    fig, axes = plt.subplots(1, 2, figsize=(14, 8), gridspec_kw={"width_ratios": [3, 1]})
+    fig.subplots_adjust(left=0.28, right=0.97, top=0.9, bottom=0.08, wspace=0.35)
+    ax = axes[0]
+    ys = range(len(rows))
+    for i, (name, w, l, net) in zip(ys, rows):
+        ax.barh(i, net, color=green if net > 0 else (red if net < 0 else th["muted"]), zorder=2)
+        ax.text(net + (0.1 if net >= 0 else -0.1), i, f"{w}-{l}", va="center",
+                ha="left" if net >= 0 else "right", color=th["fg"], fontsize=11)
+        ax.text(-0.3, i, name, va="center", ha="right", color=th["fg"], fontsize=11, transform=ax.get_yaxis_transform())
+    ax.axvline(0, color=th["muted"], lw=1)
+    ax.set_yticks([]); ax.set_ylim(-0.6, len(rows) - 0.4)
+    m = max((abs(r[3]) for r in rows), default=1) + 1
+    ax.set_xlim(-m, m); ax.set_xlabel("net record vs opponent combo (wins − losses)", color=th["fg"])
+    ax.set_title("MATCHUP PROFILE — who you beat / who beats you", color=orange, fontsize=15, fontweight="bold", loc="left")
+    # finish vulnerability
+    ax2 = axes[1]
+    fl = list(loss.items())[:6]
+    ax2.barh(range(len(fl)), [v for _, v in fl][::-1], color=red, alpha=0.8)
+    ax2.set_yticks(range(len(fl))); ax2.set_yticklabels([k.replace("Opp ", "") for k, _ in fl][::-1], color=th["fg"], fontsize=10)
+    ax2.set_xlabel("% of losses", color=th["fg"]); ax2.set_title("BEATEN BY", color=orange, fontsize=13, fontweight="bold", loc="left")
+    for a in axes:
+        a.set_facecolor(th["bg"])
+        for s in a.spines.values(): s.set_color(th["muted"])
+        a.tick_params(colors=th["fg"]); a.grid(axis="x", alpha=0.1, color=th["muted"])
+    fig.patch.set_facecolor(th["bg"])
+    fig.suptitle(f"{coach_result['player']} — {coach_result['n_events']} events, confidence {coach_result['confidence']['tier']}",
+                 color=th["fg"], fontsize=12, x=0.28, ha="left", y=0.965)
+    plt.savefig(out, dpi=130, facecolor=th["bg"]); plt.close(); return out

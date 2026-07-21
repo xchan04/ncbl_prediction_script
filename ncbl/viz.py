@@ -97,7 +97,7 @@ def follow(league, cfg, player, out, t_from=None, t_to=None, fps=60,
         fig.patch.set_facecolor(th["bg"]); ax.set_facecolor(th["bg"])
         for s in ax.spines.values(): s.set_color(th["muted"])
         ax.tick_params(colors=th["fg"]); ax.grid(axis="x", alpha=0.1, color=th["muted"])
-        fall = max(0.0, re - cfg["target_rank"] - 4); fs = 15 + fall*2.0
+        fall = max(0.0, re - cfg["target_rank"] - 4); fs = min(15 + fall * 2.0, 34)
         bc = th["player"] if re <= rows else th["cutoff"]
         arrow = " ▼" if re > rows else ""
         ax.text(0.985, 0.96, f"{league.name(player)}: #{int(round(re))}{arrow}", transform=ax.transAxes,

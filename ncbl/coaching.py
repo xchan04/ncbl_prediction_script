@@ -335,11 +335,22 @@ def _style_advice(axis):
 TIER_BONUS = {"S": 0.30, "A": 0.15, "B": 0.0, "C": -0.10, "D": -0.30, None: 0.0}
 
 
-def recommend(agg, meta, deck_size=3, top_meta=6):
-    """Recommend a next-tournament deck from proven performance + meta coverage.
+def combo_parts(combo):
+    """'Shark Scale 9-60 Free Ball' -> ('Shark Scale', '9-60', 'Free Ball').
+    Ratchet is the digits token; a garbled '?-??' ratchet is treated as unknown."""
+    import re
+    m = re.search(r"[\d?]+-[\d?]+", combo)
+    if not m:
+        return (combo.strip(), None, None)
+    blade = combo[:m.start()].strip(" ·")
+    ratchet = m.group(0)
+    bit = combo[m.end():].strip(" ·")
+    return (blade, ratchet, bit or None)
 
-    Score = win-rate + PPB + tier bonus + meta-coverage bonus (winning records vs the
-    combos you keep facing). Purely from the report numbers — no external part data."""
+
+def recommend(agg, meta, deck_size=3, top_meta=6):
+    """Recommend a legal next-tournament deck: proven performance + meta coverage, with the
+    3v3 constraint that no Blade/Ratchet/Bit repeats across the deck. Purely data-driven."""
     combos = agg["combos"]
     per_pair = agg["matchups_pair"]
     meta_combos = list(meta)[:top_meta]
@@ -364,10 +375,34 @@ def recommend(agg, meta, deck_size=3, top_meta=6):
                        "confidence": _conf(c["battles"], 15, MIN_COMBO_BATTLES),
                        "reason": ", ".join(reasons)})
     scored.sort(key=lambda z: -z["score"])
-    deck = scored[:deck_size]
+
+    # build a LEGAL deck: greedily take best scorers with no repeated Blade/Ratchet/Bit
+    deck, part_conflicts = [], []
+    used = {"blade": set(), "ratchet": set(), "bit": set()}
+    for s in scored:
+        blade, ratchet, bit = combo_parts(s["combo"])
+        rkey = ratchet if (ratchet and "?" not in ratchet) else None   # unknown ratchet can't conflict
+        clash = None
+        if blade in used["blade"]:
+            clash = f"Blade '{blade}'"
+        elif rkey and rkey in used["ratchet"]:
+            clash = f"Ratchet '{rkey}'"
+        elif bit and bit in used["bit"]:
+            clash = f"Bit '{bit}'"
+        if clash:
+            part_conflicts.append({"combo": s["combo"], "clash": clash})
+            continue
+        deck.append(s)
+        used["blade"].add(blade)
+        if rkey:
+            used["ratchet"].add(rkey)
+        if bit:
+            used["bit"].add(bit)
+        if len(deck) >= deck_size:
+            break
+
     bench = [{"combo": s["combo"], "why": f"{s['win_pct']}% / {s['ppb']:+} PPB"} for s in scored
              if s["ppb"] < 0 or s["win_pct"] < 45]
-    # meta combos you keep losing to with no winning answer anywhere in your combos
     gaps = []
     for opp in meta_combos:
         rec = agg["matchups_opp"].get(opp)
@@ -380,7 +415,8 @@ def recommend(agg, meta, deck_size=3, top_meta=6):
     if agg["loss_finishes"]:
         t, p = next(iter(agg["loss_finishes"].items()))
         note = f"Your #1 loss condition is {t} ({p}%) — weight the deck toward combos that historically hold up against it."
-    return {"deck": deck, "bench": bench, "gaps": gaps, "note": note, "meta_combos": meta_combos}
+    return {"deck": deck, "bench": bench, "gaps": gaps, "note": note,
+            "part_conflicts": part_conflicts, "meta_combos": meta_combos}
 
 
 # ---------------- rendering ----------------
@@ -404,6 +440,11 @@ def coach_txt(d):
         L.append(f"  {i}. {x['combo']}  ({x['reason']}) [{x['confidence']}]")
     if not rec.get("deck"):
         L.append("  (not enough battles yet — feed more reports)")
+    if rec.get("part_conflicts"):
+        L.append("  (part rule: no shared Blade/Ratchet/Bit across the 3 — skipped:")
+        for pc in rec["part_conflicts"][:4]:
+            L.append(f"     {pc['combo']} — reuses {pc['clash']}")
+        L.append("  )")
     if rec.get("bench"):
         L.append("  bench: " + ", ".join(f"{b['combo']} ({b['why']})" for b in rec["bench"]))
     if rec.get("gaps"):
@@ -469,6 +510,9 @@ def coach_html(d, cfg, image_path=None):
         f'<div class="sug">{e(x["reason"])}</div></div>'
         for i, x in enumerate(rec.get("deck", []), 1)) or f'<div class="sub">not enough battles yet</div>'
     rec_extra = ""
+    if rec.get("part_conflicts"):
+        rec_extra += (f'<div class="sub">Part rule (no shared Blade/Ratchet/Bit) skipped: '
+                      + ", ".join(f'{e(pc["combo"])} (reuses {e(pc["clash"])})' for pc in rec["part_conflicts"][:4]) + '</div>')
     if rec.get("bench"):
         rec_extra += f'<div class="sub">Bench: ' + ", ".join(e(b["combo"]) for b in rec["bench"]) + '</div>'
     if rec.get("gaps"):

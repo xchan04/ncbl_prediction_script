@@ -78,3 +78,26 @@ def test_recommendation_picks_best_and_benches_bad():
     assert "Cobalt 9-60 Elevate" in deck                 # S/A engine is recommended
     assert any(b["combo"] == "Shark 7-70 Low Rush" for b in rec["bench"])  # -2.5 combo benched
     assert deck and deck[0] not in [b["combo"] for b in rec["bench"]]      # top pick isn't a benched combo
+
+
+def test_combo_parts_split():
+    assert C.combo_parts("Shark Scale 9-60 Free Ball") == ("Shark Scale", "9-60", "Free Ball")
+    assert C.combo_parts("Cobalt Dragoon 9-60 Elevate") == ("Cobalt Dragoon", "9-60", "Elevate")
+
+
+def test_recommended_deck_has_no_shared_parts():
+    # two strong combos share the Blade 'Dranzer' and one shares a Bit -> deck must not reuse parts
+    reps = [_rep("E",
+                 combos=[("Dranzer 3-60 Attack", 80, 1.0, 12, "S"),
+                         ("Dranzer 9-60 Attack", 78, 0.9, 12, "S"),   # shares Blade + Bit with #1
+                         ("Wizard Rod 3-70 Attack", 70, 0.6, 10, "A"),  # shares Ratchet 3-60? no; shares Bit Attack
+                         ("Phoenix 1-80 Guard", 68, 0.5, 10, "A")])]
+    rec = C.coach(reps, "espiiii")["recommendation"]
+    deck = [x["combo"] for x in rec["deck"]]
+    blades = [C.combo_parts(cbo)[0] for cbo in deck]
+    ratchets = [C.combo_parts(cbo)[1] for cbo in deck]
+    bits = [C.combo_parts(cbo)[2] for cbo in deck]
+    assert len(blades) == len(set(blades))       # no repeated blade
+    assert len(ratchets) == len(set(ratchets))   # no repeated ratchet
+    assert len(bits) == len(set(bits))           # no repeated bit
+    assert rec["part_conflicts"]                 # the clashing combos were flagged

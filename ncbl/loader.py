@@ -29,6 +29,7 @@ class League:
         self.last_event = {}                   # lc name -> last t_index seen
         self.published_rank = {}               # lc name -> int (from rankings tab)
         self.published_points = {}             # lc name -> float
+        self.roster = set()                    # lc names eligible to be ranked
 
     # ---------- loading ----------
     def load(self, path, data_sheet=None, rankings_sheet=None):
@@ -141,6 +142,12 @@ class League:
             self.last_event[e["player"]] = max(self.last_event.get(e["player"], 0), ti)
         for p in self.by_player:
             self.by_player[p].sort()
+        # roster = the universe of players eligible to be ranked.
+        # With ranked_only, restrict to those in the rankings tab (registered players).
+        if self.cfg.get("ranked_only", True) and self.published_rank:
+            self.roster = {p for p in self.by_player if p in self.published_rank}
+        else:
+            self.roster = set(self.by_player.keys())
 
     # ---------- helpers ----------
     def name(self, lc):

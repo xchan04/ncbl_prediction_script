@@ -13,6 +13,10 @@ DEFAULTS = {
     "best_of": 6,
     "of_first": 10,
     "gs_win_points": 0.33,
+    # Only rank players listed in the rankings tab (registered players).
+    # If True and a rankings tab is loaded, unregistered/guest competitors are
+    # excluded from standings, ranks, predictions, and videos.
+    "ranked_only": True,
     # (lo, hi, key) inclusive field-size tiers
     "cap_tiers": [
         [8, 16, "8-16"], [17, 24, "17-24"], [25, 32, "25-32"],

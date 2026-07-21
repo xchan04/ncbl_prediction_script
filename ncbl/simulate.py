@@ -44,8 +44,9 @@ def _future_counts(league, cfg, exclude=None):
     sched = cfg["schedule"]
     n_total = len(league.tournaments)
     known = sched.get("known_events") or []
+    universe = league.roster if league.roster else set(league.by_player.keys())
     out = {}
-    for p in league.by_player:
+    for p in universe:
         if p == exclude:
             continue
         slots = max(0, cfg["of_first"] - league.n_events(p))
@@ -61,7 +62,8 @@ def _future_counts(league, cfg, exclude=None):
 
 
 def _strong_pool(league):
-    allpts = [pt for evs in league.by_player.values() for _, pt in evs]
+    universe = league.roster if league.roster else set(league.by_player.keys())
+    allpts = [pt for p in universe for _, pt in league.by_player[p]]
     allpts.sort(reverse=True)
     return allpts[: max(1, len(allpts) // 4)]
 
@@ -83,7 +85,8 @@ class Simulator:
         """Return dict of probabilities for a given target-player event list."""
         rng = random.Random(self.mc["seed"])
         fut = _future_counts(self.league, self.cfg, exclude=player)
-        others = [p for p in self.base if p != player]
+        universe = self.league.roster if self.league.roster else set(self.base.keys())
+        others = [p for p in universe if p != player]
         invited = set(x.lower().replace(" ", "") for x in (invited or []))
         top_hits = 0
         stage_hits = 0
@@ -171,7 +174,8 @@ def threats(league, cfg, player, window=6, top=8):
     r1 = S.ranks(league, n)
     me0, me1 = r0.get(player, 999), r1.get(player, 999)
     overtook, live = [], []
-    for p in league.by_player:
+    universe = league.roster if league.roster else set(league.by_player.keys())
+    for p in universe:
         if p == player:
             continue
         a, b = r0.get(p, 999), r1.get(p, 999)

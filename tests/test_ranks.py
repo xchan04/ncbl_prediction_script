@@ -50,3 +50,18 @@ def test_tie_has_no_gap_or_overlap(league):
     """Two tied players occupy consecutive, distinct ranks."""
     rk = S.ranks(league)
     assert abs(rk["cee"] - rk["dee"]) == 1
+
+
+def test_ranked_only_excludes_unregistered(cfg):
+    """With ranked_only, only players in the rankings tab are ranked."""
+    from ncbl.loader import League
+    lg = League(cfg)
+    for ref, p, pts in [(1, "Reg1", 3.0), (2, "Reg2", 2.0), (3, "GuestX", 5.0)]:
+        lg._add_row(ref, "T1", 32, p, "1st", 0, pts)
+    # only Reg1/Reg2 are on the rankings tab
+    lg._add_rank(1, "Reg1", 3.0)
+    lg._add_rank(2, "Reg2", 2.0)
+    lg._finalize()
+    names = {lg.name(p) for p, _ in S.standings(lg)}
+    assert names == {"Reg1", "Reg2"}          # GuestX excluded despite top score
+    assert S.rank_of(lg, "reg1") == 1

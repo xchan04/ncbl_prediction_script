@@ -113,7 +113,8 @@ def follow(league, cfg, player, out, t_from=None, t_to=None, fps=60,
 def _bumpbase(league, cfg, t_from, t_to):
     snaps = S.snapshots(league, t_from, t_to)
     rk = [{p: i+1 for i, (p, _) in enumerate(sorted(d.items(), key=lambda z:-z[1]), 1)} for d in snaps]
-    players = [p for p in league.by_player if any(p in rk[i] for i in range(len(snaps)))]
+    universe = league.roster if league.roster else set(league.by_player.keys())
+    players = [p for p in universe if any(p in rk[i] for i in range(len(snaps)))]
     series = {p: [rk[i].get(p) for i in range(len(snaps))] for p in players}
     tnames = [_short(league.tournaments[t-1]) for t in range(t_from, t_to+1)]
     nmax = max((max(m.values()) for m in rk if m), default=1)
@@ -183,7 +184,8 @@ def montecarlo(league, cfg, player, out, rols=8, cols=14, fps=40, dur=7.0, targe
     th = cfg["theme"]; rng = random.Random(cfg["monte_carlo"]["seed"])
     from .simulate import event_menu
     mine = sorted([pt for _, pt in league.by_player[player]], reverse=True)
-    contenders = sorted([league.score(p) for p in league.by_player], reverse=True)[:45]
+    _universe = league.roster if league.roster else set(league.by_player.keys())
+    contenders = sorted([league.score(p) for p in _universe], reverse=True)[:45]
     m = event_menu(cfg, cfg["schedule"]["default_cap"])
     slots = max(1, cfg["of_first"] - league.n_events(player))
     NT = rols*cols; BARS = 7

@@ -2,31 +2,45 @@
 from __future__ import annotations
 
 
-def standings(league, upto=None):
-    """Return [(lc_name, score)] sorted best-first, computed through tournament `upto`."""
+def _universe(league, extra=None):
+    """Players eligible to be ranked (the roster), optionally including `extra`."""
+    base = league.roster if league.roster else set(league.by_player.keys())
+    if extra:
+        base = base | {extra}
+    return base
+
+
+def standings(league, upto=None, include=None):
+    """Return [(lc_name, score)] sorted best-first, computed through tournament `upto`.
+
+    Only players in the roster (registered, if ranked_only) are ranked; `include`
+    forces a specific player in even if unregistered (used for the queried player).
+    """
     upto = upto if upto is not None else len(league.tournaments)
-    rows = [(p, league.points_through(p, upto)) for p in league.by_player]
+    universe = _universe(league, include)
+    rows = [(p, league.points_through(p, upto)) for p in universe]
     rows = [(p, s) for p, s in rows if s > 0]
     # deterministic: score desc, then name asc so ties resolve identically everywhere
     rows.sort(key=lambda z: (-z[1], z[0]))
     return rows
 
 
-def ranks(league, upto=None):
+def ranks(league, upto=None, include=None):
     """lc_name -> rank (1=best) at tournament `upto`."""
-    return {p: i for i, (p, _) in enumerate(standings(league, upto), 1)}
+    return {p: i for i, (p, _) in enumerate(standings(league, upto, include), 1)}
 
 
 def rank_of(league, player, upto=None):
-    return ranks(league, upto).get(player)
+    return ranks(league, upto, include=player).get(player)
 
 
-def snapshots(league, t_from=1, t_to=None):
+def snapshots(league, t_from=1, t_to=None, include=None):
     """List of {lc_name: score} dicts, one per tournament index in [t_from, t_to]."""
     t_to = t_to if t_to is not None else len(league.tournaments)
+    universe = _universe(league, include)
     out = []
     for t in range(t_from, t_to + 1):
-        d = {p: league.points_through(p, t) for p in league.by_player}
+        d = {p: league.points_through(p, t) for p in universe}
         out.append({p: s for p, s in d.items() if s > 0})
     return out
 

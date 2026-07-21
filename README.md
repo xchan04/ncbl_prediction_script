@@ -65,6 +65,7 @@ JSON file passed via `--config` — see **`config.example.json`**. Key sections:
 | `columns` / `rankings_cols` | column layout (1-indexed) if the sheet changes |
 | `placement_points`, `cap_tiers`, `gs_win_points` | the scoring table |
 | `best_of`, `of_first` | the "best 6 of first 10" rule |
+| `ranked_only` | rank only registered players (those on the rankings tab); excludes guests/unregistered |
 | `schedule.known_events` | list upcoming events `{name, cap}` if known |
 | `schedule.remaining_events` | fallback when schedule is unknown (gap-fill) |
 | `invited`, `wildcards`, `open_spots` | invitational open-spot analysis (0 disables) |

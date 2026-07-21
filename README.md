@@ -138,6 +138,10 @@ requirements.txt
   (each PDF section parses independently), and older/letter-spaced report layouts
   partial-parse rather than failing. More/other players' reports simply widen the meta.
 
+The HTML report **embeds the matchup chart inline** (no separate image needed) and includes a
+**Rivals — head-to-head** section (your record vs each opponent from the match recaps),
+scoped by `--season` (or lifetime). A `_matchups.png` is also written for reuse.
+
 ## Challonge head-to-head
 `challonge` pulls match results from Challonge brackets — no combos, but it answers
 "who keeps beating me" and covers tournaments that never published an NCBL report.

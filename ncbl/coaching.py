@@ -225,12 +225,19 @@ def _conf(n, hi, mid):
 
 
 # ---------------- analysis ----------------
-def coach(reports, player):
+def coach(reports, player, scope="lifetime"):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
     conf = confidence(agg)
     weaknesses, strengths, swaps, meta_notes = [], [], [], []
+
+    # rivals: your head-to-head vs each opponent PLAYER (from match recaps), nemeses first
+    rivals = []
+    for opp, (w, l) in agg["opp_players"].items():
+        rivals.append({"player": opp, "wins": w, "losses": l, "played": w + l,
+                       "win_pct": round(100 * w / max(1, w + l), 1)})
+    rivals.sort(key=lambda r: (r["wins"] - r["losses"], -r["played"]))
 
     # combo strengths / liabilities
     for name, c in sorted(agg["combos"].items(), key=lambda z: z[1]["ppb"]):
@@ -300,10 +307,11 @@ def coach(reports, player):
         note = f" — you are {rec[0]}-{rec[1]} vs it" if rec else " — no data on your record"
         meta_notes.append({"combo": opp, "seen": freq, "text": f"{opp} (seen {freq}x){note}"})
 
-    return {"player": agg["player"], "events": agg["events"], "n_events": agg["n_events"],
+    return {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
             "combos": agg["combos"], "loss_finishes": agg["loss_finishes"],
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
+            "rivals": rivals,
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -334,7 +342,7 @@ def _next_tier(conf):
 
 def coach_txt(d):
     c = d["confidence"]
-    L = [f"{d['player']} — coaching report",
+    L = [f"{d['player']} — coaching report  [scope: {d.get('scope','lifetime')}]",
          f"{d['n_events']} event(s) · {c['battles']} battles · confidence: {c['tier']}",
          f"archetype: {d.get('archetype')}  style: {d.get('style')}",
          f"(feed more reports: {_next_tier(c).replace('**','')})", ""]
@@ -350,6 +358,12 @@ def coach_txt(d):
         L.append(f"  vs {s['opp']} (you {s['record']}) -> {s['suggestion']}")
     if not d["swaps"]:
         L.append("  (none — no clean in-deck answer found for your losing matchups)")
+    L.append(f"\nRIVALS — your head-to-head ({d.get('scope','lifetime')})")
+    for r in d.get("rivals", []):
+        tag = "  <-- nemesis" if r["losses"] > r["wins"] and r["played"] >= 2 else ""
+        L.append(f"  {r['player']:20} {r['wins']}-{r['losses']}  ({r['win_pct']}%, {r['played']} sets){tag}")
+    if not d.get("rivals"):
+        L.append("  (no match-recap data in these reports)")
     L.append("\nMETA — field you keep facing")
     for m in d["meta"]:
         L.append(f"  * {m['text']}")
@@ -360,7 +374,7 @@ def coach_json(d):
     return json.dumps(d, indent=2, default=str)
 
 
-def coach_html(d, cfg):
+def coach_html(d, cfg, image_path=None):
     th = cfg.get("theme", {})
     bg, fg, orange = th.get("bg", "#000"), th.get("fg", "#e6edf3"), th.get("player", "#ff8c1a")
     green, red, muted, panel, border = "#57e26b", th.get("cutoff", "#ff5555"), th.get("muted", "#6b7280"), "#0d0d0d", "#241a0e"
@@ -381,12 +395,33 @@ def coach_html(d, cfg):
                   f'<b>vs {e(s["opp"])}</b> — you {e(s["record"])}<div class="sug">{e(s["suggestion"])}</div></div>')
     meta = block("Meta — field you keep facing", d["meta"],
                  lambda m: f'<div class="row"><span class="dot" style="background:{muted}"></span>{e(m["text"])}</div>')
+
+    # rivals (head-to-head vs players), nemeses highlighted
+    rival_rows = "".join(
+        f'<tr><td>{e(r["player"])}</td>'
+        f'<td style="text-align:right;color:{green if r["wins"]>=r["losses"] else red}">{r["wins"]}-{r["losses"]}</td>'
+        f'<td style="text-align:right">{r["win_pct"]}%</td>'
+        f'<td style="text-align:right;color:{muted}">{r["played"]}</td></tr>'
+        for r in d.get("rivals", [])) or f'<tr><td colspan="4" style="color:{muted}">no match-recap data</td></tr>'
+
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
         f'<td style="text-align:right">{c["win_pct"]}%</td><td style="text-align:right">{c["ppb"]:+}</td>'
         f'<td style="text-align:right">{c["battles"]}</td><td style="text-align:center;color:{muted}">{c.get("trend") or ""}</td></tr>'
         for n, c in sorted(d["combos"].items(), key=lambda z: -z[1]["ppb"]))
     c = d["confidence"]
+    scope = d.get("scope", "lifetime")
+
+    # embed the matchup visual inline (base64) if a PNG was rendered
+    img_html = ""
+    if image_path and os.path.exists(image_path):
+        import base64
+        with open(image_path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode()
+        img_html = (f'<h2>Matchup profile</h2>'
+                    f'<img alt="matchup chart" style="width:100%;border:1px solid {border};border-radius:10px" '
+                    f'src="data:image/png;base64,{b64}">')
+
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>{e(d['player'])} — coaching</title>
 <style>
  body{{background:{bg};color:{fg};font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:32px}}
@@ -396,14 +431,19 @@ def coach_html(d, cfg):
  .row{{padding:8px 0;border-bottom:1px solid {border};font-size:15px}} .dot{{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:9px}}
  .sug{{color:{muted};font-size:13px;margin:3px 0 0 18px}} .tag{{color:{muted};font-size:11px;border:1px solid {border};border-radius:8px;padding:1px 6px;margin-left:8px}}
  table{{width:100%;border-collapse:collapse;font-size:14px}} th,td{{padding:7px 10px;border-bottom:1px solid {border}}} th{{color:{muted};text-align:left}}
- .nudge{{color:{orange};font-size:13px;margin-top:8px}}
+ .nudge{{color:{orange};font-size:13px;margin-top:8px}} .pill{{color:{orange};border:1px solid {orange};border-radius:8px;padding:1px 8px;font-size:12px}}
 </style></head><body><div class="wrap">
- <h1>{e(d['player'])}</h1>
+ <h1>{e(d['player'])} <span class="pill">{e(scope)}</span></h1>
  <div class="card"><span class="big">{d['n_events']} event(s) · {c['battles']} battles · confidence
    <b style="color:{orange}">{c['tier']}</b></span><br>
    <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
    <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
- {strengths}{weaknesses}{swaps}{meta}
+ {strengths}{weaknesses}{swaps}
+ <h2>Rivals — head-to-head ({e(scope)})</h2>
+ <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>
+   <tbody>{rival_rows}</tbody></table>
+ {meta}
+ {img_html}
  <h2>Your combos (all events)</h2>
  <table><thead><tr><th>Combo</th><th style="text-align:center">Tier</th><th style="text-align:right">Win%</th>
    <th style="text-align:right">PPB</th><th style="text-align:right">Btl</th><th style="text-align:center">Trend</th></tr></thead>
@@ -412,9 +452,10 @@ def coach_html(d, cfg):
 </div></body></html>"""
 
 
-def write_all(d, cfg, basepath):
+def write_all(d, cfg, basepath, image_path=None):
     paths = []
-    for ext, text in (("txt", coach_txt(d)), ("json", coach_json(d)), ("html", coach_html(d, cfg))):
+    for ext, text in (("txt", coach_txt(d)), ("json", coach_json(d)),
+                      ("html", coach_html(d, cfg, image_path))):
         p = f"{basepath}.{ext}"
         with open(p, "w") as fh:
             fh.write(text)

@@ -139,15 +139,17 @@ def cmd_coach(args):
     players = sorted({str(r["player"]).lower() for r in reports if r.get("player")})
     if not args.player:
         raise SystemExit("error: --player is required. Reports contain: " + ", ".join(players))
-    res = CO.coach(reports, args.player)
+    res = CO.coach(reports, args.player, scope=scope)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
-    paths = CO.write_all(res, cfg, base)
+    img = base + "_matchups.png"
     try:
-        viz.matchup_chart(res, cfg, base + "_matchups.png")
-        paths.append(base + "_matchups.png")
+        viz.matchup_chart(res, cfg, img)
     except Exception as ex:
-        print("(visual skipped:", ex, ")")
+        print("(visual skipped:", ex, ")"); img = None
+    paths = CO.write_all(res, cfg, base, image_path=img)   # HTML embeds the chart inline
+    if img:
+        paths.append(img)
     print(CO.coach_txt(res))
     print(f"[{len(reports)} report(s) · scope: {scope} · confidence {res['confidence']['tier']}]")
     print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)

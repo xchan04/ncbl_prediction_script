@@ -19,6 +19,8 @@ No Claude agent required. Point it at the sheet, pass a player name, get the num
 > **What can I get for what I have?** See **[docs/CAPABILITIES.md](docs/CAPABILITIES.md)** — a
 > full input→output matrix. Minimum: username + league spreadsheet (+ season length + a schedule,
 > accurate or estimated). Add NCBLAST report PDFs and/or Challonge links for progressively richer reports.
+>
+> **Just want the commands?** See **[docs/QUICKSTART.md](docs/QUICKSTART.md)** — copy-paste, grouped by what you have.
 
 ## Install
 

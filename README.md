@@ -16,6 +16,10 @@ No Claude agent required. Point it at the sheet, pass a player name, get the num
 4. **Handles unknown schedules** — if you know the upcoming events, list them; if not, it gap-fills each rival's future count from their attendance rate.
 5. **Generates videos** parameterized by player: follow-cam climb, whole-field bump chart, Monte-Carlo mosaic, region map, and a 9:16 vertical hook.
 
+> **What can I get for what I have?** See **[docs/CAPABILITIES.md](docs/CAPABILITIES.md)** — a
+> full input→output matrix. Minimum: username + league spreadsheet (+ season length + a schedule,
+> accurate or estimated). Add NCBLAST report PDFs and/or Challonge links for progressively richer reports.
+
 ## Install
 
 ```bash

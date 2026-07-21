@@ -26,11 +26,21 @@ from .loader import League
 from . import standings as S
 from . import simulate as SIM
 from . import viz
+from . import report as R
 
 
 def _load(args):
+    if not getattr(args, "input", None):
+        raise SystemExit("error: --input is required (path to the downloaded .xlsx, a Data-Entry .csv, "
+                         "or a folder of CSVs).\nRun 'python -m ncbl --help' for examples.")
+    if not os.path.exists(args.input):
+        raise SystemExit(f"error: input not found: {args.input}\n"
+                         "Download the league sheet (File -> Download) and pass its path with --input.")
     cfg = load_config(args.config)
     league = League(cfg).load(args.input)
+    if not league.by_player:
+        raise SystemExit("error: no results found in the input. Check that it's the league sheet and that "
+                         "'data_entry_sheet'/'columns' in your config match its layout.")
     return cfg, league
 
 
@@ -86,6 +96,22 @@ def cmd_threats(args):
         print(f"  {league.name(p):18} #{b}  {s:.2f}  ({slots} slots left)")
 
 
+def cmd_report(args):
+    cfg, league = _load(args)
+    player = _pkey(league, args.player)
+    data = R.build(league, cfg, player, target_rank=args.target,
+                   remaining=args.remaining, window=args.window, top=args.top or 25)
+    os.makedirs(args.outdir, exist_ok=True)
+    base = os.path.join(args.outdir, args.name or _slug(data["player"]) + "_report")
+    paths = R.write_all(data, cfg, base)
+    print(R.to_txt(data))
+    print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
+
+
+def _slug(name):
+    return "".join(c if c.isalnum() else "_" for c in name).strip("_").lower()
+
+
 def cmd_video(args):
     cfg, league = _load(args)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -113,6 +139,9 @@ def cmd_all(args):
     player = _pkey(league, args.player)
     od = args.outdir; os.makedirs(od, exist_ok=True)
     j = lambda f: os.path.join(od, f)
+    print("report (txt/json/html)...")
+    data = R.build(league, cfg, player, target_rank=args.target, remaining=args.remaining)
+    R.write_all(data, cfg, j("report"))
     print("standings racer..."); viz.follow(league, cfg, player, j("climb.mp4"), published_end=True)
     print("overview...");        viz.overview(league, cfg, player, j("overview.mp4"))
     print("monte carlo...");     viz.montecarlo(league, cfg, player, j("montecarlo.mp4"))
@@ -122,29 +151,80 @@ def cmd_all(args):
     print("\nAll assets written to", od)
 
 
+_EPILOG = """\
+examples:
+  # 1) get the data: open the Google Sheet -> File -> Download -> Excel (.xlsx)
+  # 2) run any command below, pointing --input at that file
+
+  python -m ncbl standings --input sheet.xlsx --top 20
+  python -m ncbl predict   --input sheet.xlsx --player espiiii --config config.json
+  python -m ncbl report    --input sheet.xlsx --player espiiii --outdir out/
+  python -m ncbl threats   --input sheet.xlsx --player espiiii
+  python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4
+  python -m ncbl all       --input sheet.xlsx --player espiiii --outdir out/
+
+--input accepts: the whole workbook .xlsx, a Data-Entry .csv, or a folder of the CSVs.
+Copy config.example.json -> config.json to set the season tabs, schedule, and invite lists.
+"""
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="ncbl", description="NCBL ranking prediction + video pipeline")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    ap = argparse.ArgumentParser(
+        prog="ncbl", description="NCBL ranking prediction + video pipeline",
+        epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,threats,video,all}")
 
     def common(p):
-        p.add_argument("--input", required=True, help="Path to the downloaded .xlsx (or a Data-Entry .csv / folder of CSVs)")
-        p.add_argument("--config", help="Optional JSON config overriding defaults")
+        p.add_argument("--input", required=True, metavar="PATH",
+                       help="league sheet: .xlsx workbook, a Data-Entry .csv, or a folder of CSVs")
+        p.add_argument("--config", metavar="FILE", help="JSON config overriding ncbl/config.py defaults")
 
-    p = sub.add_parser("standings"); common(p); p.add_argument("--top", type=int); p.set_defaults(func=cmd_standings)
-    p = sub.add_parser("predict"); common(p)
-    p.add_argument("--player", required=True); p.add_argument("--target", type=int); p.add_argument("--remaining", type=int)
+    p = sub.add_parser("standings", help="print the current standings")
+    common(p); p.add_argument("--top", type=int, metavar="N", help="show top N (default 25)")
+    p.set_defaults(func=cmd_standings)
+
+    p = sub.add_parser("predict", help="probabilities of reaching a target rank for a player")
+    common(p)
+    p.add_argument("--player", required=True, help="player name (any casing)")
+    p.add_argument("--target", type=int, metavar="RANK", help="target rank (default from config)")
+    p.add_argument("--remaining", type=int, metavar="N", help="events the player will still play (default: open slots)")
     p.set_defaults(func=cmd_predict)
-    p = sub.add_parser("threats"); common(p); p.add_argument("--player", required=True); p.add_argument("--window", type=int, default=6); p.set_defaults(func=cmd_threats)
-    p = sub.add_parser("video"); common(p)
-    p.add_argument("kind", choices=["follow", "drop", "climb", "overview", "montecarlo", "map", "hook"])
-    p.add_argument("--player", default=""); p.add_argument("--out", required=True)
+
+    p = sub.add_parser("report", help="write a .txt + .json + .html report for a player")
+    common(p)
+    p.add_argument("--player", required=True, help="player name (any casing)")
+    p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
+    p.add_argument("--name", metavar="BASE", help="output basename (default: <player>_report)")
+    p.add_argument("--target", type=int, metavar="RANK")
+    p.add_argument("--remaining", type=int, metavar="N")
+    p.add_argument("--window", type=int, default=6, metavar="N", help="recent-events window for threats (default 6)")
+    p.add_argument("--top", type=int, metavar="N", help="standings rows to include (default 25)")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("threats", help="who overtook the player / who can still catch them")
+    common(p); p.add_argument("--player", required=True); p.add_argument("--window", type=int, default=6, metavar="N")
+    p.set_defaults(func=cmd_threats)
+
+    p = sub.add_parser("video", help="render one visualization")
+    common(p)
+    p.add_argument("kind", choices=["follow", "drop", "climb", "overview", "montecarlo", "map", "hook"],
+                   help="which visualization to render")
+    p.add_argument("--player", default="", help="player to feature (not needed for map)")
+    p.add_argument("--out", required=True, metavar="PATH", help="output file (.mp4, or .png for map)")
     p.add_argument("--t-from", dest="t_from", type=int); p.add_argument("--t-to", dest="t_to", type=int)
-    p.add_argument("--published-end", action="store_true", help="Anchor final frame to the published ranking")
+    p.add_argument("--published-end", action="store_true", help="anchor final frame to the published ranking")
     p.add_argument("--title"); p.add_argument("--top-number", type=int, default=14); p.add_argument("--drop-number", type=int, default=21)
     p.set_defaults(func=cmd_video)
-    p = sub.add_parser("all"); common(p); p.add_argument("--player", required=True); p.add_argument("--outdir", default="out"); p.set_defaults(func=cmd_all)
+
+    p = sub.add_parser("all", help="render every report + video for a player into one folder")
+    common(p); p.add_argument("--player", required=True); p.add_argument("--outdir", default="out", metavar="DIR")
+    p.add_argument("--target", type=int, metavar="RANK"); p.add_argument("--remaining", type=int, metavar="N")
+    p.set_defaults(func=cmd_all)
 
     args = ap.parse_args(argv)
+    if not args.cmd:
+        ap.print_help()
+        raise SystemExit(0)
     args.func(args)
 
 

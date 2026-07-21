@@ -43,6 +43,9 @@ python -m ncbl predict  --input sheet.xlsx --player espiiii --config config.json
 # Who overtook them / who can still catch them
 python -m ncbl threats  --input sheet.xlsx --player espiiii --window 6
 
+# Packaged report for a player -> .txt + .json + styled .html (black/orange)
+python -m ncbl report   --input sheet.xlsx --player espiiii --outdir out/
+
 # One video: follow | overview | montecarlo | map | hook
 python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4 --published-end
 python -m ncbl video hook   --input sheet.xlsx --out out/hook.mp4 --top-number 14 --drop-number 21
@@ -103,6 +106,7 @@ ncbl/
   loader.py      read xlsx/csv -> normalized League object
   standings.py   standings, ranks, snapshots, cutoff
   simulate.py    Monte-Carlo engine + predict/threats reports
+  report.py      package a player report as .txt / .json / .html
   viz.py         all video/chart generators
   cli.py         argparse CLI  (python -m ncbl ...)
 config.example.json

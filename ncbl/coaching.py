@@ -311,7 +311,7 @@ def coach(reports, player, scope="lifetime"):
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
             "combos": agg["combos"], "loss_finishes": agg["loss_finishes"],
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
-            "rivals": rivals,
+            "rivals": rivals, "recommendation": recommend(agg, meta),
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -331,6 +331,58 @@ def _style_advice(axis):
             "Deck Usage": "Deck leans on one combo — deepen your other two."}.get(axis, f"Improve {axis}.")
 
 
+# ---------------- next-tournament recommendation (data-driven) ----------------
+TIER_BONUS = {"S": 0.30, "A": 0.15, "B": 0.0, "C": -0.10, "D": -0.30, None: 0.0}
+
+
+def recommend(agg, meta, deck_size=3, top_meta=6):
+    """Recommend a next-tournament deck from proven performance + meta coverage.
+
+    Score = win-rate + PPB + tier bonus + meta-coverage bonus (winning records vs the
+    combos you keep facing). Purely from the report numbers — no external part data."""
+    combos = agg["combos"]
+    per_pair = agg["matchups_pair"]
+    meta_combos = list(meta)[:top_meta]
+    scored = []
+    for name, c in combos.items():
+        if c["battles"] < MIN_COMBO_BATTLES:
+            continue
+        covered = [opp for opp in meta_combos
+                   if (wl := per_pair.get((name, opp))) and wl[0] > wl[1] and (wl[0] + wl[1]) >= 2]
+        score = c["win_pct"] / 100.0 + c["ppb"] + TIER_BONUS.get(c["tier"], 0.0) + 0.1 * len(covered)
+        reasons = []
+        if c["tier"] in ("S", "A"):
+            reasons.append(f"tier {c['tier']}")
+        reasons.append(f"{c['win_pct']}% / {c['ppb']:+} PPB over {c['battles']} btl")
+        if covered:
+            reasons.append(f"beats {len(covered)} of your common meta combos")
+        if c.get("trend") == "up":
+            reasons.append("trending up")
+        scored.append({"combo": name, "score": round(score, 3), "win_pct": c["win_pct"],
+                       "ppb": c["ppb"], "tier": c["tier"], "battles": c["battles"],
+                       "covered": covered, "trend": c.get("trend"),
+                       "confidence": _conf(c["battles"], 15, MIN_COMBO_BATTLES),
+                       "reason": ", ".join(reasons)})
+    scored.sort(key=lambda z: -z["score"])
+    deck = scored[:deck_size]
+    bench = [{"combo": s["combo"], "why": f"{s['win_pct']}% / {s['ppb']:+} PPB"} for s in scored
+             if s["ppb"] < 0 or s["win_pct"] < 45]
+    # meta combos you keep losing to with no winning answer anywhere in your combos
+    gaps = []
+    for opp in meta_combos:
+        rec = agg["matchups_opp"].get(opp)
+        if rec and rec[1] > rec[0]:
+            answer = any((per_pair.get((n, opp), [0, 0])[0] > per_pair.get((n, opp), [0, 0])[1])
+                         for n in combos)
+            if not answer:
+                gaps.append({"opp": opp, "record": f"{rec[0]}-{rec[1]}"})
+    note = None
+    if agg["loss_finishes"]:
+        t, p = next(iter(agg["loss_finishes"].items()))
+        note = f"Your #1 loss condition is {t} ({p}%) — weight the deck toward combos that historically hold up against it."
+    return {"deck": deck, "bench": bench, "gaps": gaps, "note": note, "meta_combos": meta_combos}
+
+
 # ---------------- rendering ----------------
 def _next_tier(conf):
     if conf["tier"] == "Bronze":
@@ -346,6 +398,19 @@ def coach_txt(d):
          f"{d['n_events']} event(s) · {c['battles']} battles · confidence: {c['tier']}",
          f"archetype: {d.get('archetype')}  style: {d.get('style')}",
          f"(feed more reports: {_next_tier(c).replace('**','')})", ""]
+    rec = d.get("recommendation") or {}
+    L.append("RECOMMENDED NEXT-TOURNAMENT DECK")
+    for i, x in enumerate(rec.get("deck", []), 1):
+        L.append(f"  {i}. {x['combo']}  ({x['reason']}) [{x['confidence']}]")
+    if not rec.get("deck"):
+        L.append("  (not enough battles yet — feed more reports)")
+    if rec.get("bench"):
+        L.append("  bench: " + ", ".join(f"{b['combo']} ({b['why']})" for b in rec["bench"]))
+    if rec.get("gaps"):
+        L.append("  unanswered meta: " + ", ".join(f"{g['opp']} ({g['record']})" for g in rec["gaps"]))
+    if rec.get("note"):
+        L.append(f"  note: {rec['note']}")
+    L.append("")
     L.append("STRENGTHS")
     for s in d["strengths"]:
         L.append(f"  + {s['text']}")
@@ -396,6 +461,22 @@ def coach_html(d, cfg, image_path=None):
     meta = block("Meta — field you keep facing", d["meta"],
                  lambda m: f'<div class="row"><span class="dot" style="background:{muted}"></span>{e(m["text"])}</div>')
 
+    # recommended next-tournament deck
+    rec = d.get("recommendation") or {}
+    deck_rows = "".join(
+        f'<div class="row"><span class="dot" style="background:{green}"></span>'
+        f'<b>{i}. {e(x["combo"])}</b><span class="tag">{x["confidence"]}</span>'
+        f'<div class="sug">{e(x["reason"])}</div></div>'
+        for i, x in enumerate(rec.get("deck", []), 1)) or f'<div class="sub">not enough battles yet</div>'
+    rec_extra = ""
+    if rec.get("bench"):
+        rec_extra += f'<div class="sub">Bench: ' + ", ".join(e(b["combo"]) for b in rec["bench"]) + '</div>'
+    if rec.get("gaps"):
+        rec_extra += f'<div class="sub" style="color:{red}">Unanswered meta: ' + ", ".join(f'{e(g["opp"])} ({g["record"]})' for g in rec["gaps"]) + '</div>'
+    if rec.get("note"):
+        rec_extra += f'<div class="nudge">{e(rec["note"])}</div>'
+    recommendation = f'<h2>Recommended next-tournament deck</h2>{deck_rows}{rec_extra}'
+
     # rivals (head-to-head vs players), nemeses highlighted
     rival_rows = "".join(
         f'<tr><td>{e(r["player"])}</td>'
@@ -438,6 +519,7 @@ def coach_html(d, cfg, image_path=None):
    <b style="color:{orange}">{c['tier']}</b></span><br>
    <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
    <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
+ {recommendation}
  {strengths}{weaknesses}{swaps}
  <h2>Rivals — head-to-head ({e(scope)})</h2>
  <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>

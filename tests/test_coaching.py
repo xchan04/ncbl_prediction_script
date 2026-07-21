@@ -69,3 +69,12 @@ def test_renders_all_three_formats(tmp_path):
     paths = C.write_all(res, load_config(), str(tmp_path / "coach"))
     assert sorted(p.rsplit(".", 1)[1] for p in paths) == ["html", "json", "txt"]
     assert "espiiii" in C.coach_html(res, load_config())
+
+
+def test_recommendation_picks_best_and_benches_bad():
+    res = C.coach(_reports(), "espiiii")
+    rec = res["recommendation"]
+    deck = [x["combo"] for x in rec["deck"]]
+    assert "Cobalt 9-60 Elevate" in deck                 # S/A engine is recommended
+    assert any(b["combo"] == "Shark 7-70 Low Rush" for b in rec["bench"])  # -2.5 combo benched
+    assert deck and deck[0] not in [b["combo"] for b in rec["bench"]]      # top pick isn't a benched combo

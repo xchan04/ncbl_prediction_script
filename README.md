@@ -142,6 +142,11 @@ The HTML report **embeds the matchup chart inline** (no separate image needed) a
 **Rivals — head-to-head** section (your record vs each opponent from the match recaps),
 scoped by `--season` (or lifetime). A `_matchups.png` is also written for reuse.
 
+It also produces a **Recommended next-tournament deck** — a data-driven 3-combo pick that leans
+on your best-performing combos (win% + PPB + tier), rewards combos with winning records vs the
+combos you keep facing, benches your negative-PPB combos, and flags meta combos you have no
+answer for. All from the report numbers — no AI, no external part database.
+
 ## Challonge head-to-head
 `challonge` pulls match results from Challonge brackets — no combos, but it answers
 "who keeps beating me" and covers tournaments that never published an NCBL report.

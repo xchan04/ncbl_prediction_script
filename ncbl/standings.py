@@ -7,13 +7,14 @@ def standings(league, upto=None):
     upto = upto if upto is not None else len(league.tournaments)
     rows = [(p, league.points_through(p, upto)) for p in league.by_player]
     rows = [(p, s) for p, s in rows if s > 0]
-    rows.sort(key=lambda z: -z[1])
+    # deterministic: score desc, then name asc so ties resolve identically everywhere
+    rows.sort(key=lambda z: (-z[1], z[0]))
     return rows
 
 
 def ranks(league, upto=None):
     """lc_name -> rank (1=best) at tournament `upto`."""
-    return {p: i + 1 for i, (p, _) in enumerate(standings(league, upto), 1)}
+    return {p: i for i, (p, _) in enumerate(standings(league, upto), 1)}
 
 
 def rank_of(league, player, upto=None):

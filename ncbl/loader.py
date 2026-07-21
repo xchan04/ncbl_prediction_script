@@ -67,7 +67,7 @@ class League:
         col = self.cfg["columns"]
         files = [path]
         if os.path.isdir(path):
-            files = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(".csv")]
+            files = sorted(os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(".csv"))
         for f in files:
             low = os.path.basename(f).lower()
             with open(f, newline="") as fh:

@@ -33,13 +33,13 @@ class League:
     # ---------- loading ----------
     def load(self, path, data_sheet=None, rankings_sheet=None):
         ext = os.path.splitext(path)[1].lower()
-        if ext in (".xlsx", ".xlsm"):
+        if os.path.isdir(path) or ext == ".csv":
+            self._load_csv_dir(path)
+        elif ext in (".xlsx", ".xlsm"):
             self._load_xlsx(path, data_sheet or self.cfg["data_entry_sheet"],
                             rankings_sheet or self.cfg["rankings_sheet"])
-        elif ext == ".csv":
-            self._load_csv_dir(path)
         else:
-            raise ValueError(f"Unsupported input: {path} (use .xlsx or a .csv)")
+            raise ValueError(f"Unsupported input: {path} (use .xlsx, a .csv, or a folder of CSVs)")
         self._finalize()
         return self
 

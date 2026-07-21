@@ -52,26 +52,29 @@ def parse(path):
     return rep
 
 
+def _collapsed(s):
+    return re.sub(r"\s", "", s).upper()
+
+
 # ---------------- cover / totals ----------------
 def _player(lines):
     for i, ln in enumerate(lines):
-        if ln.strip() == "PLAYER":
+        if _collapsed(ln) == "PLAYER":           # matches "PLAYER" and letter-spaced "P L A Y E R"
             for j in range(i + 1, min(i + 5, len(lines))):
                 s = lines[j].strip()
                 if s and "NORCAL" not in s.upper():
-                    s = re.sub(r"^[A-Z]{1,2}\s+", "", s)  # strip avatar initials (E / ES)
-                    if s and s != "E":
+                    s = re.sub(r"^[A-Z]{1,2}\s+", "", s)     # strip leading avatar initials
+                    if s and s not in ("E", "ES") and not re.fullmatch(r"[A-Z]{1,2}", s):
                         return s
     return None
 
 
 def _event(lines):
     for i, ln in enumerate(lines):
-        if ln.strip().startswith("EVENT") and "DATE" in ln and "FORMAT" in ln:
-            if i + 1 < len(lines):
-                m = re.match(r"(.+?)\s+[A-Z][a-z]+ \d{1,2}, \d{4}\s+", lines[i + 1])
-                if m:
-                    return m.group(1).strip()
+        if "EVENTDATEFORMAT" in _collapsed(ln) and i + 1 < len(lines):
+            m = re.match(r"(.+?)\s+[A-Z][a-z]+ \d{1,2}, \d{4}", lines[i + 1])
+            if m:
+                return m.group(1).strip()
     return None
 
 
@@ -86,7 +89,7 @@ def _date(lines):
 def _totals(lines):
     t = {}
     for i, ln in enumerate(lines):
-        if re.match(r"\s*RECORD\s+PLACEMENT\s+PPB\s+WIN%", ln) and i + 1 < len(lines):
+        if _collapsed(ln).startswith("RECORDPLACEMENTPPBWIN%") and i + 1 < len(lines):
             m = re.search(rf"(\d+){DASH}(\d+)\s+(\S+)\s+({_num})\s+([\d.]+)%", lines[i + 1])
             if m:
                 t["wins"] = int(m.group(1)); t["losses"] = int(m.group(2))

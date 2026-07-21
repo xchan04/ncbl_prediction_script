@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Local data + generated media (don't commit the league sheet or renders)
+*.xlsx
+*.xlsm
+*.csv
+_test*
+_smoke/
+out/
+*.mp4
+# keep example/config
+!config.example.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

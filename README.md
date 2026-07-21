@@ -1,0 +1,101 @@
+# ncbl_prediction_script
+
+Reproduce the whole NorCal Beyblade League (NCBL) ranking analysis for **any player** —
+standings, "what do I need to do" probabilities, threat lists, and the full set of
+climbing/animation videos — from the downloaded Google Sheet.
+
+No Claude agent required. Point it at the sheet, pass a player name, get the numbers and the videos.
+
+---
+
+## What it does
+
+1. **Ingests** the league sheet (whole workbook `.xlsx`, or per-tab `.csv` exports).
+2. **Computes standings** using the real formula: `placement points (by field-size tier) + GS wins × 0.33`, scored as **best 6 of your first 10** events. Verified to match the published tab.
+3. **Predicts** with a Monte-Carlo simulation (replays the rest of the season thousands of times) → `P(Top N)`, best/worst outcomes, and (optionally) `P(invitational open-spot)`.
+4. **Handles unknown schedules** — if you know the upcoming events, list them; if not, it gap-fills each rival's future count from their attendance rate.
+5. **Generates videos** parameterized by player: follow-cam climb, whole-field bump chart, Monte-Carlo mosaic, region map, and a 9:16 vertical hook.
+
+## Install
+
+```bash
+pip install -r requirements.txt          # openpyxl, matplotlib
+# videos also need ffmpeg on PATH:  brew install ffmpeg   (macOS)
+```
+
+## Get the data
+
+The Google Sheet has no open API here, so download it manually:
+**File → Download →** either **Microsoft Excel (.xlsx)** (easiest — one file, all tabs)
+or **CSV** of the *Data Entry* and *Solo Rankings* tabs.
+
+## Usage
+
+Run from the repo root (the folder containing the `ncbl/` package):
+
+```bash
+# Standings
+python -m ncbl standings --input sheet.xlsx --top 20
+
+# What does a player need to do? (uses config.json for schedule / invite lists)
+python -m ncbl predict  --input sheet.xlsx --player espiiii --config config.json
+
+# Who overtook them / who can still catch them
+python -m ncbl threats  --input sheet.xlsx --player espiiii --window 6
+
+# One video: follow | overview | montecarlo | map | hook
+python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4 --published-end
+python -m ncbl video hook   --input sheet.xlsx --out out/hook.mp4 --top-number 14 --drop-number 21
+
+# The whole video package for a player
+python -m ncbl all --input sheet.xlsx --player espiiii --outdir out/
+```
+
+CSV input: pass the Data-Entry CSV directly, or a **folder** containing both the
+Data-Entry and Solo-Rankings CSVs (matched by filename keywords).
+
+## Configuration
+
+Everything tunable lives in `ncbl/config.py` (`DEFAULTS`). Override any field with a
+JSON file passed via `--config` — see **`config.example.json`**. Key sections:
+
+| Field | Purpose |
+|---|---|
+| `data_entry_sheet` / `rankings_sheet` | tab names for the current season |
+| `columns` / `rankings_cols` | column layout (1-indexed) if the sheet changes |
+| `placement_points`, `cap_tiers`, `gs_win_points` | the scoring table |
+| `best_of`, `of_first` | the "best 6 of first 10" rule |
+| `schedule.known_events` | list upcoming events `{name, cap}` if known |
+| `schedule.remaining_events` | fallback when schedule is unknown (gap-fill) |
+| `invited`, `wildcards`, `open_spots` | invitational open-spot analysis (0 disables) |
+| `monte_carlo` | trials, breakout probability, seed |
+| `regions`, `home`, `reach_limit_lat` | the setting/map video |
+| `target_rank` | the rank you're chasing |
+
+### New season / different league
+Change `data_entry_sheet`, `rankings_sheet`, and (if the cap tiers or point values
+change) the `placement_points` table. Nothing else is hard-coded.
+
+## Notes / gotchas baked in
+- Player names are normalized to lowercase and **case-variant typos are merged**
+  (the sheet logs e.g. `deviousSprite` and `DeviousSprite` separately).
+- The published rankings tab can have tie/skip rank numbers; use `--published-end`
+  on videos to anchor the final frame to the **official** rank instead of a recompute.
+- Monte-Carlo assumptions (breakout %, gap-fill) are all in config — tune to taste.
+
+## Layout
+```
+ncbl/
+  points.py      scoring table + score_event / best-of
+  config.py      DEFAULTS + JSON override loader
+  loader.py      read xlsx/csv -> normalized League object
+  standings.py   standings, ranks, snapshots, cutoff
+  simulate.py    Monte-Carlo engine + predict/threats reports
+  viz.py         all video/chart generators
+  cli.py         argparse CLI  (python -m ncbl ...)
+config.example.json
+requirements.txt
+```
+
+## License
+Personal project — © xchan04.

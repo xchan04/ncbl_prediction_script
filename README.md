@@ -81,7 +81,18 @@ change) the `placement_points` table. Nothing else is hard-coded.
   (the sheet logs e.g. `deviousSprite` and `DeviousSprite` separately).
 - The published rankings tab can have tie/skip rank numbers; use `--published-end`
   on videos to anchor the final frame to the **official** rank instead of a recompute.
+- Ranks are 1-indexed with a deterministic tie-break (score desc, then name), so
+  `standings`, `predict`, and `threats` always agree.
 - Monte-Carlo assumptions (breakout %, gap-fill) are all in config — tune to taste.
+
+## Tests
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+Covers the scoring formula (points table, best-6-of-10) and rank consistency
+(standings / ranks / predict / threats must agree; ties stay stable). CI runs
+these on every push (`.github/workflows/tests.yml`).
 
 ## Layout
 ```

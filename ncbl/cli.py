@@ -28,6 +28,7 @@ from . import simulate as SIM
 from . import viz
 from . import report as R
 from . import coaching as CO
+from . import challonge as CH
 
 
 def _load(args):
@@ -136,6 +137,33 @@ def cmd_coach(args):
     print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
 
 
+def cmd_challonge(args):
+    cfg = load_config(args.config)
+    slugs = list(args.slugs or [])
+    if args.from_sheet:
+        slugs += [s for s in CH.slugs_from_sheet(args.from_sheet, cfg) if s not in slugs]
+    if not slugs:
+        raise SystemExit("error: give --slugs ncbl-goonday ... or --from-sheet sheet.xlsx to harvest links.")
+    api_key = args.api_key or os.environ.get("CHALLONGE_API_KEY")
+    tournaments, missed = [], []
+    for s in slugs:
+        try:
+            tournaments.append(CH.parse_tournament(CH.fetch(s, api_key, args.cache)))
+        except Exception as ex:
+            missed.append(f"{s}: {ex}")
+    if not tournaments:
+        raise SystemExit("error: no tournaments loaded.\n  " + "\n  ".join(missed))
+    if missed:
+        print("(skipped:", "; ".join(m.split(':')[0] for m in missed), ")")
+    a = CH.analyze(tournaments, args.player)
+    os.makedirs(args.outdir, exist_ok=True)
+    base = os.path.join(args.outdir, _slug(args.player) + "_h2h")
+    paths = CH.write_all(a, cfg, base)
+    print(CH.to_txt(a))
+    print(f"[{len(tournaments)} tournament(s) · cache: {args.cache}]")
+    print("written:", ", ".join(os.path.basename(p) for p in paths), "->", args.outdir)
+
+
 def cmd_video(args):
     cfg, league = _load(args)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -187,6 +215,7 @@ examples:
   python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4
   python -m ncbl all       --input sheet.xlsx --player espiiii --outdir out/
   python -m ncbl coach     --reports Downloads/ --player espiiii --outdir out/
+  python -m ncbl challonge --player espiiii --from-sheet sheet.xlsx --api-key KEY --outdir out/
 
 --input accepts: the whole workbook .xlsx, a Data-Entry .csv, or a folder of the CSVs.
 Copy config.example.json -> config.json to set the season tabs, schedule, and invite lists.
@@ -197,7 +226,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="ncbl", description="NCBL ranking prediction + video pipeline",
         epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,coach,threats,video,all}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,coach,challonge,threats,video,all}")
 
     def common(p):
         p.add_argument("--input", required=True, metavar="PATH",
@@ -253,6 +282,15 @@ def main(argv=None):
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
     p.set_defaults(func=cmd_coach)
+
+    p = sub.add_parser("challonge", help="head-to-head records from Challonge brackets (needs a free API key)")
+    p.add_argument("--player", required=True, help="player to build head-to-head for")
+    p.add_argument("--slugs", nargs="+", metavar="ID", help="Challonge tournament ids, e.g. ncbl-goonday")
+    p.add_argument("--from-sheet", dest="from_sheet", metavar="PATH", help="harvest Challonge links from a Data-Entry sheet")
+    p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")
+    p.add_argument("--cache", default="challonge_cache", metavar="DIR", help="JSON cache dir (enables offline reruns)")
+    p.add_argument("--config", metavar="FILE"); p.add_argument("--outdir", default="out", metavar="DIR")
+    p.set_defaults(func=cmd_challonge)
 
     args = ap.parse_args(argv)
     if not args.cmd:

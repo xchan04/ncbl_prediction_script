@@ -51,6 +51,11 @@ python -m ncbl report   --input sheet.xlsx --player espiiii --outdir out/
 python -m ncbl coach    --reports Downloads/ --player espiiii --outdir out/
 python -m ncbl coach    --reports rfv.pdf mpp.pdf rdc.pdf --player espiiii --outdir out/
 
+# CHALLONGE: head-to-head "who keeps beating you" from brackets (needs a free API key)
+# Covers tournaments that never published an NCBL report; caches JSON for offline reruns.
+python -m ncbl challonge --player espiiii --from-sheet sheet.xlsx --api-key KEY --outdir out/
+python -m ncbl challonge --player espiiii --slugs ncbl-goonday ncbl-SRSv10 --api-key KEY
+
 # One video: follow | overview | montecarlo | map | hook
 python -m ncbl video follow --input sheet.xlsx --player espiiii --out out/climb.mp4 --published-end
 python -m ncbl video hook   --input sheet.xlsx --out out/hook.mp4 --top-number 14 --drop-number 21
@@ -114,6 +119,7 @@ ncbl/
   report.py      package a player report as .txt / .json / .html
   ncblast_parser.py  parse an NCBLAST match-report PDF -> structured dict
   coaching.py    aggregate N reports -> weaknesses / meta / swaps (+ txt/json/html)
+  challonge.py   head-to-head records from Challonge brackets (cache-first, offline-friendly)
   viz.py         all video/chart generators (+ coaching matchup chart)
   cli.py         argparse CLI  (python -m ncbl ...)
 config.example.json
@@ -131,6 +137,14 @@ requirements.txt
 - **Degrades gracefully**: works from a single report, tolerates missing/garbled sections
   (each PDF section parses independently), and older/letter-spaced report layouts
   partial-parse rather than failing. More/other players' reports simply widen the meta.
+
+## Challonge head-to-head
+`challonge` pulls match results from Challonge brackets — no combos, but it answers
+"who keeps beating me" and covers tournaments that never published an NCBL report.
+Needs a free **Challonge API key** (challonge.com → Developer API); pass `--api-key` or set
+`CHALLONGE_API_KEY`. Fetched JSON is **cached** to `--cache`, so reruns work offline.
+Harvest tournament ids from the sheet's links with `--from-sheet`, or list them via `--slugs`
+(org URLs like `ncbl.challonge.com/goonday` → id `ncbl-goonday`). Output: `<player>_h2h.{txt,json,html}`.
 
 ## License
 Personal project — © xchan04.

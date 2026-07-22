@@ -525,6 +525,15 @@ def cmd_coach(args):
 
     res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community,
                    events_attended=events_attended, h2h_extra=h2h_extra)
+    if getattr(args, "use_ai", False):
+        from . import ai_layer as AI
+        print(f"[AI analyst layer: asking your personal Claude ({args.ai_model}) — this may take a moment ...]")
+        notes, err = AI.analyze(res, api_key=getattr(args, "ai_key", None), model=args.ai_model, cfg=cfg)
+        if notes:
+            res["ai_notes"] = notes
+            print("[AI analyst layer: attached]")
+        else:
+            print(f"[AI analyst layer skipped: {err}]")
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
     img = base + "_matchups.png"
@@ -722,6 +731,12 @@ def main(argv=None):
                         "even for tournaments with no report")
     p.add_argument("--h2h-file", dest="h2h_file", metavar="FILE",
                    help="manual head-to-head (json/txt of 'Opponent W-L') for brackets the API can't reach")
+    p.add_argument("--use-ai", dest="use_ai", action="store_true",
+                   help="append an AI analyst section via your personal Claude account (needs 'anthropic' + a key)")
+    p.add_argument("--ai-key", dest="ai_key", metavar="KEY",
+                   help="Anthropic API key (else ANTHROPIC_API_KEY / config anthropic_api_key / anthropic_key_file)")
+    p.add_argument("--ai-model", dest="ai_model", metavar="M", default="claude-opus-4-8",
+                   help="Claude model for the analyst layer (default: claude-opus-4-8)")
     p.add_argument("--h2h-cache", dest="h2h_cache", metavar="DIR",
                    help="Challonge cache dir (offline reuse of fetched brackets)")
     p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")

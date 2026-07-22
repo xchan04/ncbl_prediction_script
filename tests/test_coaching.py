@@ -142,6 +142,31 @@ def test_community_benchmark_empty_with_only_you():
     assert "community benchmark unlocks" in C.coach_txt(res).lower()
 
 
+def test_goal_card_summarizes_form_and_objectives():
+    reps = _reports()
+    reps[0]["totals"] = {"win_pct": 55.0, "placement": "5th"}
+    reps[1]["totals"] = {"win_pct": 68.0, "placement": "3rd"}
+    res = C.coach(reps, "espiiii")
+    g = res["goal"]
+    assert g["trend"] == "improving"                  # 55 -> 68
+    assert g["placements"] == ["5th", "3rd"]
+    assert g["objectives"]                             # at least one concrete objective
+    assert "GOAL CARD" in C.coach_txt(res)
+
+
+def test_nemesis_dossier_lists_beating_combos():
+    match = {"result": "LOSS", "opponent": "Bongo", "sets": "0-2", "battles": 3, "net": -2,
+             "opp_combos": [{"combo": "Wizard Rod 3-70 Attack", "wl": "2-0", "match_ppb": 1.0}]}
+    match2 = {"result": "LOSS", "opponent": "Bongo", "sets": "0-2", "battles": 3, "net": -2,
+              "opp_combos": [{"combo": "Wizard Rod 3-70 Attack", "wl": "2-1", "match_ppb": 0.8}]}
+    reps = [_rep("A", combos=[("Aero 1-60 Rush", 50, 0.1, 10, "B")], matches=[match, match2])]
+    res = C.coach(reps, "espiiii")
+    nem = next((n for n in res["nemeses"] if n["player"] == "Bongo"), None)
+    assert nem is not None                             # 0-2 sets -> nemesis
+    assert any("Wizard Rod" in cb["combo"] for cb in nem["combos"])
+    assert "NEMESIS DOSSIER" in C.coach_txt(res)
+
+
 def test_combo_parts_split():
     assert C.combo_parts("Shark Scale 9-60 Free Ball") == ("Shark Scale", "9-60", "Free Ball")
     assert C.combo_parts("Cobalt Dragoon 9-60 Elevate") == ("Cobalt Dragoon", "9-60", "Elevate")

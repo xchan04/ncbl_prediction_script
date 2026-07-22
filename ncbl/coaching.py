@@ -265,6 +265,61 @@ def _pair_leaders(comm, opp, exclude_combo=None, top=2):
     return rows[:top]
 
 
+# ---------------- goal card + nemesis dossier ----------------
+def goal_card(reports, player, agg, weaknesses, rec, benchmarks):
+    """A crisp finish-line card: current form, trajectory, and the next concrete objectives.
+
+    Everything is derived from the parsed reports — win% trend across events, the
+    top fixable leaks, the recommended engine, and the most winnable field matchup.
+    """
+    mine = [r for r in reports if str(r.get("player", "")).lower() == player]
+    seq = [r["totals"].get("win_pct") for r in mine if r.get("totals", {}).get("win_pct") is not None]
+    placements = [r["totals"].get("placement") for r in mine if r.get("totals", {}).get("placement")]
+    overall = _wmerge([(c["win_pct"], c["ppb"], c["battles"]) for c in agg["combos"].values()]) if agg["combos"] else {"win_pct": 0, "ppb": 0, "battles": 0}
+    trend = None
+    if len(seq) >= 2:
+        d = seq[-1] - seq[0]
+        trend = "improving" if d > 3 else "declining" if d < -3 else "steady"
+
+    objectives = []
+    hi = [w for w in weaknesses if w.get("severity") == "high"]
+    for w in hi[:2]:
+        objectives.append(w["suggestion"])
+    if benchmarks:
+        b = benchmarks[0]
+        objectives.append(f"Convert the {b['opp']} matchup (you {b['you_pct']}% vs field {b['field_pct']}%).")
+    if rec.get("deck"):
+        objectives.append("Run the recommended deck: " + ", ".join(x["combo"] for x in rec["deck"]) + ".")
+    if not objectives:
+        objectives.append("Keep feeding reports — more data sharpens every recommendation.")
+    return {"win_pct": overall["win_pct"], "ppb": overall["ppb"], "battles": overall["battles"],
+            "events": len(mine), "placements": placements, "win_seq": seq, "trend": trend,
+            "objectives": objectives[:3]}
+
+
+def nemesis_dossier(reports, player, rivals):
+    """For each nemesis (a player you're sub-.500 against over >=2 sets), the combos they
+    beat you with and your record vs each — a focused scouting card built from match recaps."""
+    mine = [r for r in reports if str(r.get("player", "")).lower() == player]
+    by_player = defaultdict(lambda: defaultdict(lambda: [0, 0]))   # opp_player -> combo -> [your_w, your_l]
+    for r in mine:
+        for mt in r["matches"]:
+            for oc in mt["opp_combos"]:
+                w, l = _wl(oc["wl"])                # opponent's W-L vs you -> invert
+                by_player[mt["opponent"]][oc["combo"]][0] += l
+                by_player[mt["opponent"]][oc["combo"]][1] += w
+    dossier = []
+    for rv in rivals:
+        if not (rv["losses"] > rv["wins"] and rv["played"] >= 2):
+            continue
+        combos = by_player.get(rv["player"], {})
+        rows = sorted(({"combo": c, "record": f"{w}-{l}", "wins": w, "losses": l, "btl": w + l}
+                       for c, (w, l) in combos.items()), key=lambda z: (z["losses"] - z["wins"], z["btl"]), reverse=True)
+        dossier.append({"player": rv["player"], "record": f"{rv['wins']}-{rv['losses']}",
+                        "win_pct": rv["win_pct"], "played": rv["played"], "combos": rows[:4]})
+    return dossier
+
+
 # ---------------- confidence ----------------
 def confidence(agg):
     e, b = agg["n_events"], agg["total_battles"]
@@ -400,13 +455,18 @@ def coach(reports, player, scope="lifetime"):
         note = f" — you are {rec[0]}-{rec[1]} vs it" if rec else " — no data on your record"
         meta_notes.append({"combo": opp, "seen": freq, "text": f"{opp} (seen {freq}x){note}"})
 
+    recommendation = recommend(agg, meta)
+    goal = goal_card(reports, player, agg, weaknesses, recommendation, benchmarks)
+    nemeses = nemesis_dossier(reports, player, rivals)
+
     return {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
             "combos": agg["combos"], "loss_finishes": agg["loss_finishes"],
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
-            "rivals": rivals, "recommendation": recommend(agg, meta),
+            "rivals": rivals, "recommendation": recommendation,
             "launch": launch, "side": agg.get("side") or {},
             "benchmarks": benchmarks, "community": {"n_players": comm["n_players"]},
+            "goal": goal, "nemeses": nemeses,
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -567,6 +627,18 @@ def coach_txt(d):
          f"{d['n_events']} event(s) · {c['battles']} battles · confidence: {c['tier']}",
          f"archetype: {d.get('archetype')}  style: {d.get('style')}",
          f"(feed more reports: {_next_tier(c).replace('**','')})", ""]
+    g = d.get("goal") or {}
+    if g:
+        form = f"form: {g.get('win_pct')}% win, {g.get('ppb'):+} PPB over {g.get('battles')} btl"
+        if g.get("trend"):
+            form += f" · trend {g['trend']}"
+        if g.get("placements"):
+            form += f" · placements {', '.join(str(p) for p in g['placements'])}"
+        L.append("GOAL CARD")
+        L.append(f"  {form}")
+        for i, o in enumerate(g.get("objectives", []), 1):
+            L.append(f"  {i}. {o}")
+        L.append("")
     rec = d.get("recommendation") or {}
     L.append("RECOMMENDED NEXT-TOURNAMENT DECK")
     for i, x in enumerate(rec.get("deck", []), 1):
@@ -620,6 +692,13 @@ def coach_txt(d):
         L.append(f"  {r['player']:20} {r['wins']}-{r['losses']}  ({r['win_pct']}%, {r['played']} sets){tag}")
     if not d.get("rivals"):
         L.append("  (no match-recap data in these reports)")
+    L.append("\nNEMESIS DOSSIER — who beats you and with what")
+    for n in d.get("nemeses", []):
+        L.append(f"  {n['player']} (you {n['record']}, {n['win_pct']}% over {n['played']} sets)")
+        for cb in n["combos"]:
+            L.append(f"     {cb['combo']:32} you {cb['record']}")
+    if not d.get("nemeses"):
+        L.append("  (no nemesis yet — you're even-or-better vs everyone with a sample)")
     L.append("\nMETA — field you keep facing")
     for m in d["meta"]:
         L.append(f"  * {m['text']}")
@@ -688,6 +767,20 @@ def coach_html(d, cfg, image_path=None):
             f'<tbody>{side_row("B", b, best=="B")}{side_row("X", x, best=="X")}</tbody></table>'
             f'<div class="nudge">{e(str(lf.get("verdict") or ""))}</div>')
 
+    # goal card — crisp finish-line summary
+    g = d.get("goal") or {}
+    goal_html = ""
+    if g:
+        chips = [f'{g.get("win_pct")}% win', f'{g.get("ppb"):+} PPB', f'{g.get("battles")} btl']
+        if g.get("trend"):
+            chips.append(f'trend {g["trend"]}')
+        if g.get("placements"):
+            chips.append("placements " + ", ".join(str(p) for p in g["placements"]))
+        obj = "".join(f'<div class="row"><span class="dot" style="background:{orange}"></span>{e(o)}</div>'
+                      for o in g.get("objectives", []))
+        goal_html = (f'<h2>Goal card</h2><div class="card"><span class="sub">'
+                     + " · ".join(e(c) for c in chips) + f'</span>{obj}</div>')
+
     # recommended next-tournament deck
     rec = d.get("recommendation") or {}
     deck_rows = "".join(
@@ -714,6 +807,19 @@ def coach_html(d, cfg, image_path=None):
         f'<td style="text-align:right">{r["win_pct"]}%</td>'
         f'<td style="text-align:right;color:{muted}">{r["played"]}</td></tr>'
         for r in d.get("rivals", [])) or f'<tr><td colspan="4" style="color:{muted}">no match-recap data</td></tr>'
+
+    # nemesis dossier — who beats you and with which combos
+    def nem_card(n):
+        rows = "".join(f'<tr><td>{e(cb["combo"])}</td>'
+                       f'<td style="text-align:right;color:{red}">{e(cb["record"])}</td></tr>'
+                       for cb in n["combos"]) or f'<tr><td colspan="2" style="color:{muted}">combos not itemized</td></tr>'
+        return (f'<div class="card"><b style="color:{red}">{e(n["player"])}</b> '
+                f'<span class="sub">— you {e(n["record"])} ({n["win_pct"]}% over {n["played"]} sets)</span>'
+                f'<table style="margin-top:8px"><thead><tr><th>Their build</th>'
+                f'<th style="text-align:right">Your record</th></tr></thead><tbody>{rows}</tbody></table></div>')
+    nemeses_html = ("<h2>Nemesis dossier</h2>" + "".join(nem_card(n) for n in d["nemeses"])
+                    if d.get("nemeses") else
+                    f'<h2>Nemesis dossier</h2><div class="sub">No nemesis yet — you\'re even-or-better vs everyone with a sample.</div>')
 
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
@@ -749,6 +855,7 @@ def coach_html(d, cfg, image_path=None):
    <b style="color:{orange}">{c['tier']}</b></span><br>
    <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
    <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
+ {goal_html}
  {recommendation}
  {strengths}{weaknesses}{swaps}
  {benchmarks_html}
@@ -756,6 +863,7 @@ def coach_html(d, cfg, image_path=None):
  <h2>Rivals — head-to-head ({e(scope)})</h2>
  <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>
    <tbody>{rival_rows}</tbody></table>
+ {nemeses_html}
  {meta}
  {img_html}
  <h2>Your combos (all events)</h2>

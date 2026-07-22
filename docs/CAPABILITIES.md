@@ -11,7 +11,7 @@ comes from the inputs below; missing inputs simply mean the matching sections ar
 | # | Input | Where it goes | What it powers |
 |---|-------|---------------|----------------|
 | 1 | **Username** | `--player` | Who every report is about |
-| 2 | **League spreadsheet** (`.xlsx` or the Data-Entry/Rankings `.csv`s) | `--input` | Standings, predictions, threats, ranking report, videos |
+| 2 | **League spreadsheet** — a downloaded `.xlsx`/`.csv`, **or a shareable sheet link** (Google Sheets URL / shortener / direct file URL) | `--input` | Standings, predictions, threats, ranking report, videos |
 | 3 | **Season length / windows** | `config.seasons` | Seasonal vs lifetime scoping; how much runway remains |
 | 4 | **Tournament schedule** (accurate *or* estimated) | `config.schedule` | Prediction accuracy (see below) |
 | 5 | **NCBLAST reports** (PDF **or** JSON) | `--reports` | Coaching: goal card, weaknesses, launch/positioning (B vs X), meta, matchup swaps, **next-deck recommendation**, community & field benchmarks, rivals + nemesis dossier, matchup visual |

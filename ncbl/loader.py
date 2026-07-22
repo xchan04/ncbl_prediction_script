@@ -1,7 +1,10 @@
-"""Load results + rankings from the downloaded Google Sheet (xlsx or per-tab CSV).
+"""Load results + rankings from the league Google Sheet.
 
-The Google Sheet has no public API here, so the workflow is: File -> Download
--> either the whole workbook (.xlsx) or each tab as .csv, then point this at it.
+Three ways in, all handled by `League.load`:
+  * a downloaded workbook (.xlsx) or per-tab .csv (or a folder of CSVs), or
+  * a **shareable link** — a Google Sheets URL (exported to xlsx on the fly) or a
+    direct http(s) link to an .xlsx/.csv — so no manual download is needed
+    (see `sheet_source.py`).
 
 Names are normalized to lowercase keys (the sheet has casing typos like
 "deviousSprite"/"DeviousSprite" that must be merged); a display-name map keeps
@@ -13,6 +16,7 @@ import os
 from collections import defaultdict, OrderedDict
 
 from . import points as P
+from . import sheet_source as SS
 
 
 class League:
@@ -33,14 +37,24 @@ class League:
 
     # ---------- loading ----------
     def load(self, path, data_sheet=None, rankings_sheet=None):
-        ext = os.path.splitext(path)[1].lower()
-        if os.path.isdir(path) or ext == ".csv":
-            self._load_csv_dir(path)
-        elif ext in (".xlsx", ".xlsm"):
-            self._load_xlsx(path, data_sheet or self.cfg["data_entry_sheet"],
-                            rankings_sheet or self.cfg["rankings_sheet"])
-        else:
-            raise ValueError(f"Unsupported input: {path} (use .xlsx, a .csv, or a folder of CSVs)")
+        """`path` may be a local .xlsx/.csv/folder, OR a shareable sheet URL
+        (Google Sheets link or a direct http(s) link to an .xlsx/.csv)."""
+        tmp = None
+        src = path
+        if SS.is_url(path):
+            src = tmp = SS.fetch(path)          # download to a temp file, load, then remove
+        try:
+            ext = os.path.splitext(src)[1].lower()
+            if os.path.isdir(src) or ext == ".csv":
+                self._load_csv_dir(src)
+            elif ext in (".xlsx", ".xlsm"):
+                self._load_xlsx(src, data_sheet or self.cfg["data_entry_sheet"],
+                                rankings_sheet or self.cfg["rankings_sheet"])
+            else:
+                raise ValueError(f"Unsupported input: {path} (use .xlsx, a .csv, a folder of CSVs, or a sheet URL)")
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
         self._finalize()
         return self
 

@@ -33,9 +33,19 @@ Re-activate the venv (`source .venv/bin/activate`) in any new shell before runni
 from anywhere instead of `python -m ncbl …` (all examples below work either way).
 
 ## 1. You have the league spreadsheet
-Download it: Google Sheet → **File → Download → Microsoft Excel (.xlsx)**.
+Two ways to point the tool at it:
+- **A file** — Google Sheet → **File → Download → Microsoft Excel (.xlsx)**, then use its path.
+- **A link** — pass the shareable sheet URL directly (no download). Works with a Google Sheets
+  link, a shortened link that redirects to one (tinyurl/bit.ly), or a direct `.xlsx`/`.csv` URL.
+  The sheet must be shared **"Anyone with the link → Viewer"** (or published to the web);
+  a private sheet that needs a Google login must be downloaded instead.
 ```bash
+# by file
 python -m ncbl standings --input sheet.xlsx --top 20
+# by link (quote it so the shell doesn't choke on # or &)
+python -m ncbl standings --input "https://docs.google.com/spreadsheets/d/<ID>/edit" --top 20
+python -m ncbl standings --input "https://tinyurl.com/NCBL2026Rankings" --top 20
+
 python -m ncbl predict   --input sheet.xlsx --player espiiii --config config.json
 python -m ncbl threats   --input sheet.xlsx --player espiiii
 python -m ncbl report    --input sheet.xlsx --player espiiii --config config.json --outdir out/

@@ -29,17 +29,21 @@ from . import viz
 from . import report as R
 from . import coaching as CO
 from . import challonge as CH
+from . import sheet_source as _SS
 
 
 def _load(args):
     if not getattr(args, "input", None):
-        raise SystemExit("error: --input is required (path to the downloaded .xlsx, a Data-Entry .csv, "
-                         "or a folder of CSVs).\nRun 'python -m ncbl --help' for examples.")
-    if not os.path.exists(args.input):
+        raise SystemExit("error: --input is required (a .xlsx / .csv / folder of CSVs, or a shareable "
+                         "sheet URL).\nRun 'python -m ncbl --help' for examples.")
+    if not _SS.is_url(args.input) and not os.path.exists(args.input):
         raise SystemExit(f"error: input not found: {args.input}\n"
-                         "Download the league sheet (File -> Download) and pass its path with --input.")
+                         "Pass the league sheet file, a folder of CSVs, or a shareable sheet link (URL).")
     cfg = load_config(args.config)
-    league = League(cfg).load(args.input)
+    try:
+        league = League(cfg).load(args.input)
+    except RuntimeError as e:                    # sheet-URL fetch problems come through here
+        raise SystemExit(f"error: {e}")
     if not league.by_player:
         raise SystemExit("error: no results found in the input. Check that it's the league sheet and that "
                          "'data_entry_sheet'/'columns' in your config match its layout.")
@@ -227,10 +231,12 @@ def cmd_all(args):
 
 _EPILOG = """\
 examples:
-  # 1) get the data: open the Google Sheet -> File -> Download -> Excel (.xlsx)
-  # 2) run any command below, pointing --input at that file
+  # get the data either way:
+  #   A) open the Google Sheet -> File -> Download -> Excel (.xlsx), or
+  #   B) just pass the shareable sheet link ('Anyone with the link -> Viewer')
 
   python -m ncbl standings --input sheet.xlsx --top 20
+  python -m ncbl standings --input "https://docs.google.com/spreadsheets/d/<ID>/edit" --top 20
   python -m ncbl predict   --input sheet.xlsx --player espiiii --config config.json
   python -m ncbl report    --input sheet.xlsx --player espiiii --outdir out/
   python -m ncbl threats   --input sheet.xlsx --player espiiii
@@ -239,7 +245,10 @@ examples:
   python -m ncbl coach     --reports Downloads/ --player espiiii --outdir out/
   python -m ncbl challonge --player espiiii --from-sheet sheet.xlsx --api-key KEY --outdir out/
 
---input accepts: the whole workbook .xlsx, a Data-Entry .csv, or a folder of the CSVs.
+--input accepts: the whole workbook .xlsx, a Data-Entry .csv, a folder of CSVs, OR a
+shareable sheet URL (Google Sheets link, a shortened link that redirects to one, or a
+direct http(s) link to an .xlsx/.csv). Link-based input needs the sheet shared to
+"Anyone with the link -> Viewer" (or published to web); private sheets must be downloaded.
 Copy config.example.json -> config.json to set the season tabs, schedule, and invite lists.
 """
 

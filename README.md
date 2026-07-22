@@ -10,7 +10,7 @@ No Claude agent required. Point it at the sheet, pass a player name, get the num
 
 ## What it does
 
-1. **Ingests** the league sheet (whole workbook `.xlsx`, or per-tab `.csv` exports).
+1. **Ingests** the league sheet (whole workbook `.xlsx`, per-tab `.csv` exports, or a shareable sheet link).
 2. **Computes standings** using the real formula: `placement points (by field-size tier) + GS wins × 0.33`, scored as **best 6 of your first 10** events. Verified to match the published tab.
 3. **Predicts** with a Monte-Carlo simulation (replays the rest of the season thousands of times) → `P(Top N)`, best/worst outcomes, and (optionally) `P(invitational open-spot)`.
 4. **Handles unknown schedules** — if you know the upcoming events, list them; if not, it gap-fills each rival's future count from their attendance rate.
@@ -55,9 +55,20 @@ ncbl coach --reports ~/Downloads/ --player espiiii --outdir out/
 
 ## Get the data
 
-The Google Sheet has no open API here, so download it manually:
-**File → Download →** either **Microsoft Excel (.xlsx)** (easiest — one file, all tabs)
-or **CSV** of the *Data Entry* and *Solo Rankings* tabs.
+Two options — no code difference, just what you pass to `--input`:
+
+- **A file** — Google Sheet → **File → Download →** **Microsoft Excel (.xlsx)** (easiest — one
+  file, all tabs) or **CSV** of the *Data Entry* and *Solo Rankings* tabs.
+- **A link** — pass the shareable sheet URL directly, no download needed:
+  ```bash
+  python -m ncbl standings --input "https://docs.google.com/spreadsheets/d/<ID>/edit" --top 20
+  python -m ncbl standings --input "https://tinyurl.com/NCBL2026Rankings" --top 20   # shorteners ok
+  ```
+  A Google Sheets link is exported to `.xlsx` on the fly (all tabs preserved); a shortened link
+  that redirects to one, or a direct `http(s)` link to an `.xlsx`/`.csv`, also work. The sheet
+  must be shared **"Anyone with the link → Viewer"** (or published to the web) — a private sheet
+  needing a Google login can't be fetched, so download that once and pass the file instead.
+  (Uses only the Python standard library; no extra dependency.)
 
 ## Usage
 

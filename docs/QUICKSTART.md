@@ -6,11 +6,24 @@ what each input unlocks.
 
 ## 0. Setup (once)
 ```bash
+# clone (personal SSH alias from ACCESS.md; or use your https remote)
+git clone git@github-personal:xchan04/ncbl_prediction_script.git
 cd ncbl_prediction_script
+
+# create + activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# dependencies (inside the venv)
 pip install -r requirements.txt          # openpyxl, matplotlib, pdfplumber
+pip install -r requirements-dev.txt      # optional: pytest, to run the tests
 # videos also need ffmpeg on PATH:  macOS: brew install ffmpeg
+
 cp config.example.json config.json       # then edit: season tabs, schedule, invite lists
+python -m ncbl --help                     # verify
 ```
+Re-activate the venv (`source .venv/bin/activate`) in any new shell before running commands.
+`.venv/` is gitignored, so it never gets committed.
 
 ## 1. You have the league spreadsheet
 Download it: Google Sheet → **File → Download → Microsoft Excel (.xlsx)**.

@@ -25,9 +25,21 @@ No Claude agent required. Point it at the sheet, pass a player name, get the num
 ## Install
 
 ```bash
-pip install -r requirements.txt          # openpyxl, matplotlib
+git clone git@github-personal:xchan04/ncbl_prediction_script.git
+cd ncbl_prediction_script
+
+python3 -m venv .venv                    # create a virtual environment
+source .venv/bin/activate                # Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt          # openpyxl, matplotlib, pdfplumber
+pip install -r requirements-dev.txt      # optional: pytest
 # videos also need ffmpeg on PATH:  brew install ffmpeg   (macOS)
+
+cp config.example.json config.json       # edit season tabs / schedule / invite lists
+python -m ncbl --help                    # verify
 ```
+Run commands from the repo root as `python -m ncbl …` (re-activate the venv in new shells).
+`.venv/` is gitignored.
 
 ## Get the data
 

@@ -28,3 +28,8 @@ _season*
 .idea/
 .vscode/
 challonge_cache/
+
+# packaging build artifacts
+*.egg-info/
+build/
+dist/

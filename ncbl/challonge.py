@@ -86,6 +86,45 @@ def slugs_from_file(path):
     return slugs
 
 
+def load_h2h_file(path):
+    """Manual head-to-head for brackets you can't pull from the API (e.g. tournaments you did
+    not organize — API v1 is account-scoped). Record YOUR result vs each opponent as 'W-L'.
+
+    Accepts:
+      .json flat:    {"Oyapapi": "1-0", "Bongo": "0-2"}
+      .json nested:  {"GoonDay": {"Oyapapi": "1-0"}, "FDFC": {"Teefoh": "0-2"}}
+      .txt / .md:    one 'Opponent W-L' (or 'Opponent: 1-0') per line; '#' lines are comments.
+    Returns [{opponent, wins, losses}] summed across all entries."""
+    rec = defaultdict(lambda: [0, 0])
+
+    def add(opp, wl):
+        opp = str(opp).strip()
+        m = re.search(r"(\d+)\s*[-–]\s*(\d+)", str(wl))
+        if opp and m:
+            rec[opp][0] += int(m.group(1))
+            rec[opp][1] += int(m.group(2))
+
+    with open(path, encoding="utf-8") as fh:
+        raw = fh.read()
+    if os.path.splitext(path)[1].lower() == ".json":
+        data = json.loads(raw)
+
+        def walk(d):
+            for k, v in d.items():
+                walk(v) if isinstance(v, dict) else add(k, v)
+        if isinstance(data, dict):
+            walk(data)
+    else:
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r"(.+?)[:\s]+(\d+\s*[-–]\s*\d+)\s*$", line)
+            if m:
+                add(m.group(1), m.group(2))
+    return [{"opponent": o, "wins": w, "losses": l} for o, (w, l) in rec.items()]
+
+
 # ---------------- fetch (cache-first) ----------------
 def fetch(slug, api_key=None, cache_dir="challonge_cache", timeout=20):
     """Return the raw tournament JSON dict. Uses the on-disk cache if present;

@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+from collections import defaultdict
 
 from .config import load_config
 from .loader import League
@@ -510,6 +511,18 @@ def cmd_coach(args):
         print("  (if a bracket you DO have a report for is listed above, its name didn't match the "
               "report's event title — tell me and I'll map it so it isn't double-counted.)")
 
+    # manual head-to-head file — for brackets the API can't reach (not your tournaments)
+    manual = CH.load_h2h_file(args.h2h_file) if getattr(args, "h2h_file", None) else []
+    if manual or h2h_extra:
+        combined = defaultdict(lambda: [0, 0])
+        for h in (h2h_extra or []):
+            combined[h["opponent"]][0] += h["wins"]; combined[h["opponent"]][1] += h["losses"]
+        for h in manual:
+            combined[h["opponent"]][0] += h["wins"]; combined[h["opponent"]][1] += h["losses"]
+        h2h_extra = [{"opponent": o, "wins": w, "losses": l} for o, (w, l) in combined.items()]
+        if manual:
+            print(f"[manual head-to-head: {len(manual)} opponent record(s) merged from {args.h2h_file}]")
+
     res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community,
                    events_attended=events_attended, h2h_extra=h2h_extra)
     os.makedirs(args.outdir, exist_ok=True)
@@ -707,6 +720,8 @@ def main(argv=None):
     p.add_argument("--links", metavar="FILE",
                    help="txt/md/json file of Challonge links (one per tournament) -> merges head-to-head, "
                         "even for tournaments with no report")
+    p.add_argument("--h2h-file", dest="h2h_file", metavar="FILE",
+                   help="manual head-to-head (json/txt of 'Opponent W-L') for brackets the API can't reach")
     p.add_argument("--h2h-cache", dest="h2h_cache", metavar="DIR",
                    help="Challonge cache dir (offline reuse of fetched brackets)")
     p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")

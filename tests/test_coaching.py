@@ -54,10 +54,10 @@ def test_h2h_extra_merges_and_adds_challonge_rivals():
            {"opponent": "Bongo", "wins": 0, "losses": 2}]
     res = C.coach(reps, "espiiii", events_attended=7, h2h_extra=h2h)
     riv = {r["player"]: r for r in res["rivals"]}
-    assert riv["Newbie"]["wins"] == 1 and riv["Newbie"]["source"] == "challonge"
+    assert riv["Newbie"]["wins"] == 1 and riv["Newbie"]["source"] == "h2h"
     assert riv["Bongo"]["losses"] == 2
     txt = C.coach_txt(res)
-    assert "challonge only" in txt.lower()
+    assert "h2h only" in txt.lower()
     agg = C.aggregate(_reports(), "espiiii")               # 2 reports
     c = C.confidence(agg, events_attended=7)               # but 7 attended per the sheet
     assert c["events"] == 7 and c["report_events"] == 2 and c["missing_reports"] == 5

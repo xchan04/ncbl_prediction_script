@@ -23,6 +23,19 @@ def test_slugs_from_file_txt_md_json(tmp_path):
     assert CH.slugs_from_file(str(js)) == ["ncbl-goonday", "wxyz9"]
 
 
+def test_load_h2h_file_txt_and_json(tmp_path):
+    txt = tmp_path / "h2h.txt"
+    txt.write_text("# GoonDay\nOyapapi 1-0\nBongo: 0-2\n\n# FDFC\nTeefoh 2-1\n")
+    recs = {r["opponent"]: (r["wins"], r["losses"]) for r in CH.load_h2h_file(str(txt))}
+    assert recs["Oyapapi"] == (1, 0) and recs["Bongo"] == (0, 2) and recs["Teefoh"] == (2, 1)
+
+    js = tmp_path / "h2h.json"
+    js.write_text('{"GoonDay": {"Oyapapi": "1-0"}, "FDFC": {"Oyapapi": "0-1", "Kai": "3-0"}}')
+    recs = {r["opponent"]: (r["wins"], r["losses"]) for r in CH.load_h2h_file(str(js))}
+    assert recs["Oyapapi"] == (1, 1)          # summed across tournaments
+    assert recs["Kai"] == (3, 0)
+
+
 
 def _mock():
     # Challonge API v1 shape

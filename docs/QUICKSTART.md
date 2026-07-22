@@ -12,7 +12,11 @@ cd ncbl_prediction_script
 
 # create + activate a virtual environment
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # macOS/Linux
+# Windows PowerShell:  .venv\Scripts\Activate.ps1
+# Windows cmd.exe:     .venv\Scripts\activate.bat
+# (Windows: use `py`/`python` instead of `python3`. If PowerShell blocks the activate
+#  script, run once: Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned)
 
 # dependencies (inside the venv)
 pip install -r requirements.txt          # openpyxl, matplotlib, pdfplumber

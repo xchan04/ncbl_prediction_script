@@ -29,7 +29,11 @@ git clone git@github-personal:xchan04/ncbl_prediction_script.git
 cd ncbl_prediction_script
 
 python3 -m venv .venv                    # create a virtual environment
-source .venv/bin/activate                # Windows: .venv\Scripts\activate
+source .venv/bin/activate                # macOS/Linux
+# Windows PowerShell:  .venv\Scripts\Activate.ps1
+# Windows cmd.exe:     .venv\Scripts\activate.bat
+# (Windows: use `py` instead of `python3`; if PS blocks the script, run once:
+#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned)
 
 pip install -r requirements.txt          # openpyxl, matplotlib, pdfplumber
 pip install -r requirements-dev.txt      # optional: pytest

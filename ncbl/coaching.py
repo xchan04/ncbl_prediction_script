@@ -15,6 +15,8 @@ from . import ncblast_parser as NP
 MIN_COMBO_BATTLES = 5      # a combo needs this many battles to be judged
 MIN_MATCHUP_FACED = 3      # aggregated encounters before a matchup finding counts
 MIN_SWAP_FACED = 2         # encounters for a combo to be a recommended answer
+MIN_SIDE_BATTLES = 6       # battles on a side before its win% is trusted
+SIDE_GAP = 8.0             # win% gap between sides that flags a positioning weakness
 
 
 # ---------------- loading ----------------
@@ -156,6 +158,19 @@ def aggregate(reports, player):
             style[k].append(v)
     style_avg = {k: round(sum(v) / len(v)) for k, v in style.items()}
 
+    # B-side / X-side split, battle-weighted across events
+    side_acc = {"B": [0, 0.0, 0.0], "X": [0, 0.0, 0.0]}   # [battles, win*btl, ppb*btl]
+    for r in mine:
+        for k, v in r.get("dynamics", {}).get("side", {}).items():
+            if k in side_acc and v.get("battles"):
+                side_acc[k][0] += v["battles"]
+                side_acc[k][1] += v["win_pct"] * v["battles"]
+                side_acc[k][2] += v["ppb"] * v["battles"]
+    side = {}
+    for k, (b, w, p) in side_acc.items():
+        if b:
+            side[k] = {"battles": b, "win_pct": round(w / b, 1), "ppb": round(p / b, 3)}
+
     # opponents (players) record
     opp_players = defaultdict(lambda: [0, 0])
     for r in mine:
@@ -169,7 +184,7 @@ def aggregate(reports, player):
         "combos": combo_stats, "loss_finishes": loss_dist,
         "matchups_pair": {k: v for k, v in per_pair.items()},
         "matchups_opp": {k: v for k, v in per_opp.items()},
-        "peer_gap": peer_gap, "style": style_avg,
+        "peer_gap": peer_gap, "style": style_avg, "side": side,
         "opp_players": {k: v for k, v in opp_players.items()},
         "archetypes": [r.get("archetype") for r in mine if r.get("archetype")],
     }
@@ -301,6 +316,9 @@ def coach(reports, player, scope="lifetime"):
                                "text": f"Low {axis} ({val} pct-rank)",
                                "suggestion": _style_advice(axis)})
 
+    # launch / positioning: B-side vs X-side split
+    launch = _launch_finding(agg.get("side") or {}, weaknesses, strengths)
+
     # meta: most common field combos you must beat
     for opp, freq in list(meta.items())[:6]:
         rec = agg["matchups_opp"].get(opp)
@@ -312,6 +330,7 @@ def coach(reports, player, scope="lifetime"):
             "combos": agg["combos"], "loss_finishes": agg["loss_finishes"],
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
             "rivals": rivals, "recommendation": recommend(agg, meta),
+            "launch": launch, "side": agg.get("side") or {},
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -329,6 +348,44 @@ def _style_advice(axis):
             "Clutch": "You fade when behind — work on come-from-behind lines.",
             "Efficiency": "Low net points per battle — trim negative-PPB combos.",
             "Deck Usage": "Deck leans on one combo — deepen your other two."}.get(axis, f"Improve {axis}.")
+
+
+# ---------------- launch / positioning (B-side vs X-side) ----------------
+def _launch_finding(side, weaknesses, strengths):
+    """Compare B-side vs X-side win% and flag a positioning weakness/strength.
+
+    NCBLAST records which side of the launcher each battle started from. A large,
+    battle-backed gap between the two sides is a coachable habit — favor the strong
+    side and drill the weak one. Returns a summary dict (or None) and appends any
+    finding to the shared weaknesses/strengths lists.
+    """
+    b, x = side.get("B"), side.get("X")
+    if not b or not x:
+        return None
+    summary = {"B": b, "X": x, "gap": round(b["win_pct"] - x["win_pct"], 1)}
+    if b["battles"] < MIN_SIDE_BATTLES or x["battles"] < MIN_SIDE_BATTLES:
+        summary["verdict"] = "not enough side-split battles to judge yet"
+        return summary
+    gap = b["win_pct"] - x["win_pct"]
+    strong, weak = ("B", "X") if gap >= 0 else ("X", "B")
+    hi, lo = side[strong], side[weak]
+    if abs(gap) >= SIDE_GAP:
+        conf = "confirmed" if min(b["battles"], x["battles"]) >= 12 else "likely"
+        summary["verdict"] = f"favor {strong}-side (+{abs(gap):.1f}% win)"
+        weaknesses.append({
+            "type": "launch", "severity": "med", "confidence": conf,
+            "text": (f"You win {hi['win_pct']}% from {strong}-side but only "
+                     f"{lo['win_pct']}% from {weak}-side ({abs(gap):.1f}% gap, "
+                     f"{hi['battles']}/{lo['battles']} btl)"),
+            "suggestion": (f"Default to {strong}-side launches when you have the choice, "
+                           f"and drill {weak}-side starts — it is your weaker opening.")})
+        strengths.append({
+            "type": "launch", "confidence": conf,
+            "text": f"Strong {strong}-side launches: {hi['win_pct']}% win, {hi['ppb']:+} PPB ({hi['battles']} btl)",
+            "suggestion": f"Steer toward {strong}-side openings — it is a real edge."})
+    else:
+        summary["verdict"] = "balanced across both sides"
+    return summary
 
 
 # ---------------- next-tournament recommendation (data-driven) ----------------
@@ -455,6 +512,13 @@ def coach_txt(d):
     L.append("STRENGTHS")
     for s in d["strengths"]:
         L.append(f"  + {s['text']}")
+    lf = d.get("launch")
+    if lf and lf.get("B") and lf.get("X"):
+        b, x = lf["B"], lf["X"]
+        L.append("\nLAUNCH & POSITIONING")
+        L.append(f"  B-side: {b['win_pct']}% win, {b['ppb']:+} PPB ({b['battles']} btl)")
+        L.append(f"  X-side: {x['win_pct']}% win, {x['ppb']:+} PPB ({x['battles']} btl)")
+        L.append(f"  -> {lf.get('verdict')}")
     L.append("\nWEAKNESSES")
     for w in d["weaknesses"]:
         L.append(f"  - [{w['severity']}/{w['confidence']}] {w['text']}")
@@ -501,6 +565,25 @@ def coach_html(d, cfg, image_path=None):
                   f'<b>vs {e(s["opp"])}</b> — you {e(s["record"])}<div class="sug">{e(s["suggestion"])}</div></div>')
     meta = block("Meta — field you keep facing", d["meta"],
                  lambda m: f'<div class="row"><span class="dot" style="background:{muted}"></span>{e(m["text"])}</div>')
+
+    # launch / positioning (B-side vs X-side)
+    lf = d.get("launch") or {}
+    launch_html = ""
+    if lf.get("B") and lf.get("X"):
+        b, x = lf["B"], lf["X"]
+        best = "B" if b["win_pct"] >= x["win_pct"] else "X"
+        def side_row(label, s, hot):
+            col = green if hot else fg
+            return (f'<tr><td style="color:{col}">{label}-side</td>'
+                    f'<td style="text-align:right;color:{col}">{s["win_pct"]}%</td>'
+                    f'<td style="text-align:right">{s["ppb"]:+}</td>'
+                    f'<td style="text-align:right;color:{muted}">{s["battles"]}</td></tr>')
+        launch_html = (
+            f'<h2>Launch &amp; positioning</h2>'
+            f'<table><thead><tr><th>Side</th><th style="text-align:right">Win%</th>'
+            f'<th style="text-align:right">PPB</th><th style="text-align:right">Btl</th></tr></thead>'
+            f'<tbody>{side_row("B", b, best=="B")}{side_row("X", x, best=="X")}</tbody></table>'
+            f'<div class="nudge">{e(str(lf.get("verdict") or ""))}</div>')
 
     # recommended next-tournament deck
     rec = d.get("recommendation") or {}
@@ -565,6 +648,7 @@ def coach_html(d, cfg, image_path=None):
    <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
  {recommendation}
  {strengths}{weaknesses}{swaps}
+ {launch_html}
  <h2>Rivals — head-to-head ({e(scope)})</h2>
  <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>
    <tbody>{rival_rows}</tbody></table>

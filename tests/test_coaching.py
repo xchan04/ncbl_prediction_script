@@ -2,7 +2,7 @@
 from ncbl import coaching as C
 
 
-def _rep(event, combos, matchups=(), matches=(), loss=None, style=None, peers=()):
+def _rep(event, combos, matchups=(), matches=(), loss=None, style=None, peers=(), dynamics=None):
     return {
         "player": "espiiii", "event": event, "date": None, "source": event,
         "totals": {}, "archetype": "The Strategist",
@@ -11,6 +11,7 @@ def _rep(event, combos, matchups=(), matches=(), loss=None, style=None, peers=()
         "matchups": [{"your_combo": m[0], "opp_combo": m[1], "faced": m[2], "wins": m[3],
                       "losses": m[4], "win_pct": 0, "ppb": 0, "net": 0} for m in matchups],
         "matches": list(matches), "peers": list(peers), "style": style or {},
+        "dynamics": dynamics or {"side": {}, "points_dist": {}},
     }
 
 
@@ -78,6 +79,40 @@ def test_recommendation_picks_best_and_benches_bad():
     assert "Cobalt 9-60 Elevate" in deck                 # S/A engine is recommended
     assert any(b["combo"] == "Shark 7-70 Low Rush" for b in rec["bench"])  # -2.5 combo benched
     assert deck and deck[0] not in [b["combo"] for b in rec["bench"]]      # top pick isn't a benched combo
+
+
+def test_side_split_aggregates_battle_weighted():
+    reps = [_rep("A", combos=[("Cobalt 9-60 Elevate", 70, 0.5, 20, "S")],
+                 dynamics={"side": {"B": {"win_pct": 60.0, "battles": 10, "ppb": 0.2},
+                                    "X": {"win_pct": 50.0, "battles": 10, "ppb": 0.1}}, "points_dist": {}}),
+            _rep("B", combos=[("Cobalt 9-60 Elevate", 70, 0.5, 20, "S")],
+                 dynamics={"side": {"B": {"win_pct": 80.0, "battles": 30, "ppb": 0.4},
+                                    "X": {"win_pct": 50.0, "battles": 10, "ppb": 0.1}}, "points_dist": {}})]
+    agg = C.aggregate(reps, "espiiii")
+    assert agg["side"]["B"]["battles"] == 40
+    # battle-weighted: (60*10 + 80*30)/40 = 75.0
+    assert agg["side"]["B"]["win_pct"] == 75.0
+    assert agg["side"]["X"]["win_pct"] == 50.0
+
+
+def test_launch_gap_flags_positioning_weakness():
+    reps = [_rep("A", combos=[("Cobalt 9-60 Elevate", 70, 0.5, 20, "S")],
+                 dynamics={"side": {"B": {"win_pct": 72.0, "battles": 20, "ppb": 0.4},
+                                    "X": {"win_pct": 48.0, "battles": 15, "ppb": 0.0}}, "points_dist": {}})]
+    res = C.coach(reps, "espiiii")
+    assert res["launch"]["gap"] == 24.0
+    assert any(w["type"] == "launch" and "X-side" in w["text"] for w in res["weaknesses"])
+    assert any(s["type"] == "launch" for s in res["strengths"])
+    assert "LAUNCH & POSITIONING" in C.coach_txt(res)
+
+
+def test_launch_balanced_no_weakness():
+    reps = [_rep("A", combos=[("Cobalt 9-60 Elevate", 70, 0.5, 20, "S")],
+                 dynamics={"side": {"B": {"win_pct": 62.0, "battles": 20, "ppb": 0.3},
+                                    "X": {"win_pct": 60.0, "battles": 20, "ppb": 0.3}}, "points_dist": {}})]
+    res = C.coach(reps, "espiiii")
+    assert res["launch"]["verdict"] == "balanced across both sides"
+    assert not any(w["type"] == "launch" for w in res["weaknesses"])
 
 
 def test_combo_parts_split():

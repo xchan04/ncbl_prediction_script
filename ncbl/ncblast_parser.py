@@ -45,6 +45,7 @@ def parse(path):
         "style": _style(lines),
         "archetype": _archetype(lines),
         "matches": _matches(lines),
+        "dynamics": _dynamics(full),
     }
     # attach tier onto each combo by index/name
     for c in rep["combos"]:
@@ -257,3 +258,20 @@ def _matches(lines):
                 cur["opp_combos"].append({"combo": _norm(m.group(1)), "wl": f"{m.group(2)}-{m.group(3)}",
                                           "match_ppb": float(m.group(4))})
     return out
+
+
+# ---------------- battle dynamics (side split + points distribution) ----------------
+def _dynamics(full):
+    d = {"side": {}, "points_dist": {}}
+    # overall B-side / X-side split: two decimal percentages, then two "N btl · PPB ±x"
+    pct = re.search(r"(\d+\.\d+)%\s+(\d+\.\d+)%", full)
+    bp = re.search(rf"(\d+)\s*btl\s*[·.\-]?\s*PPB\s*({_num})\s+(\d+)\s*btl\s*[·.\-]?\s*PPB\s*({_num})", full)
+    if pct and bp:
+        d["side"] = {
+            "B": {"win_pct": float(pct.group(1)), "battles": int(bp.group(1)), "ppb": float(bp.group(2))},
+            "X": {"win_pct": float(pct.group(2)), "battles": int(bp.group(3)), "ppb": float(bp.group(4))},
+        }
+    # per-combo points distribution: lines like "Aero 23 17 +6"
+    for m in re.finditer(r"^([A-Z][A-Za-z]+)\s+(\d+)\s+(\d+)\s+([+-]?\d+)$", full, re.M):
+        d["points_dist"][m.group(1)] = {"scored": int(m.group(2)), "allowed": int(m.group(3)), "net": int(m.group(4))}
+    return d

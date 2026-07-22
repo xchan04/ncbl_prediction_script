@@ -33,3 +33,4 @@ challonge_cache/
 *.egg-info/
 build/
 dist/
+_run_config.json

@@ -76,10 +76,11 @@ python -m ncbl threats  --input sheet.xlsx --player espiiii --window 6
 # Packaged report for a player -> .txt + .json + styled .html (black/orange)
 python -m ncbl report   --input sheet.xlsx --player espiiii --outdir out/
 
-# COACH: analyze NCBLAST match-report PDFs -> weaknesses / what-to-run / matchup swaps
-# Accepts a folder or any number of PDFs. More reports = higher confidence + deeper analysis.
+# COACH: analyze NCBLAST match reports -> weaknesses / what-to-run / matchup swaps
+# Accepts a folder or any number of reports, PDF OR JSON. More reports = higher confidence.
 python -m ncbl coach    --reports Downloads/ --player espiiii --outdir out/
 python -m ncbl coach    --reports rfv.pdf mpp.pdf rdc.pdf --player espiiii --outdir out/
+python -m ncbl coach    --reports rfv.json mpp.json --player espiiii --outdir out/    # JSON
 
 # CHALLONGE: head-to-head "who keeps beating you" from brackets (needs a free API key)
 # Covers tournaments that never published an NCBL report; caches JSON for offline reruns.
@@ -148,6 +149,7 @@ ncbl/
   simulate.py    Monte-Carlo engine + predict/threats reports
   report.py      package a player report as .txt / .json / .html
   ncblast_parser.py  parse an NCBLAST match-report PDF -> structured dict
+  ncblast_json.py    parse an NCBLAST report JSON (schema-agnostic) -> same dict
   coaching.py    aggregate N reports -> weaknesses / meta / swaps (+ txt/json/html)
   challonge.py   head-to-head records from Challonge brackets (cache-first, offline-friendly)
   viz.py         all video/chart generators (+ coaching matchup chart)
@@ -157,8 +159,8 @@ requirements.txt
 ```
 
 ## Coach mode — robust to how much data you have
-`coach` ingests **any number** of NCBLAST report PDFs (a folder or a list) and gets
-**more comprehensive the more you feed it** — an explicit incentive to collect reports:
+`coach` ingests **any number** of NCBLAST reports — **PDF or JSON**, a folder or a list — and
+gets **more comprehensive the more you feed it** — an explicit incentive to collect reports:
 - Every finding is **data-driven** (traceable to the report numbers) — no AI at runtime,
   no external part database.
 - Sample sizes accumulate across reports, so findings graduate *tentative → likely →
@@ -167,6 +169,22 @@ requirements.txt
 - **Degrades gracefully**: works from a single report, tolerates missing/garbled sections
   (each PDF section parses independently), and older/letter-spaced report layouts
   partial-parse rather than failing. More/other players' reports simply widen the meta.
+
+### JSON reports — schema-agnostic parsing
+The NCBLAST devs also provide reports as **JSON**. Drop `*.json` files into the same
+`--reports` folder (or list them) and they're parsed alongside PDFs — no flag needed.
+Because the exact JSON key names and nesting aren't fixed, the JSON parser is
+**schema-agnostic**: it finds each field by *meaning*, not by a fixed path —
+- **alias matching** on normalized keys (`winRate`, `win_pct`, `winPercent`, `wr` all map to win%),
+- **deep tree search** (fields can live at any nesting depth), and
+- **shape detection** (a row with a combo string + win%/battles is a combo; a row with two
+  combos + W-L is a matchup), plus value coercion (`0.63`, `63.2`, `"63.2%"` → `63.2`).
+
+This means a **new JSON layout usually needs no code change** — it round-trips whether the file
+matches our own shape or renames/re-nests everything. It's *best effort*, not a guarantee: a
+field it genuinely can't recognize degrades to empty rather than crashing (the coaching engine
+then just skips that section). If the devs introduce a brand-new *name* for something, add it to
+the relevant alias set at the top of `ncbl/ncblast_json.py` — a one-line change, no logic edits.
 
 The HTML report **embeds the matchup chart inline** (no separate image needed) and includes a
 **Rivals — head-to-head** section (your record vs each opponent from the match recaps),

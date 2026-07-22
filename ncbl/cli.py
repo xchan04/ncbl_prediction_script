@@ -127,8 +127,8 @@ def cmd_coach(args):
     cfg = load_config(args.config)
     reports = CO.load_reports(args.reports)
     if not reports:
-        raise SystemExit("error: no NCBLAST report PDFs could be read from --reports.\n"
-                         "Pass a folder of report .pdf files or one/more file paths.")
+        raise SystemExit("error: no NCBLAST reports could be read from --reports.\n"
+                         "Pass a folder of report .pdf/.json files or one/more file paths.")
     scope = "lifetime"
     if args.season:
         reports = CO.filter_by_season(reports, args.season, cfg.get("seasons") or {})
@@ -300,9 +300,9 @@ def main(argv=None):
     p.add_argument("--target", type=int, metavar="RANK"); p.add_argument("--remaining", type=int, metavar="N")
     p.set_defaults(func=cmd_all)
 
-    p = sub.add_parser("coach", help="analyze NCBLAST match-report PDFs -> coaching report + visual")
+    p = sub.add_parser("coach", help="analyze NCBLAST match reports (PDF or JSON) -> coaching report + visual")
     p.add_argument("--reports", required=True, nargs="+", metavar="PATH",
-                   help="a folder of NCBLAST report PDFs, or one/more PDF paths (more = higher confidence)")
+                   help="a folder of NCBLAST reports, or one/more .pdf/.json paths (more = higher confidence)")
     p.add_argument("--player", help="player to coach (any casing); reports list their player")
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")

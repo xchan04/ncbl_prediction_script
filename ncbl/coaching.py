@@ -22,20 +22,29 @@ COMMUNITY_GAP = 15.0       # win% the field beats you by before a matchup is fla
 
 
 # ---------------- loading ----------------
+def _parse_any(path):
+    """Dispatch by extension: NCBLAST reports may arrive as PDF or (schema-agnostic) JSON."""
+    if str(path).lower().endswith(".json"):
+        from . import ncblast_json as NJ
+        return NJ.parse(path)
+    return NP.parse(path)
+
+
 def load_reports(paths):
-    """Accept a file, a list of files, or a folder; parse each PDF; dedupe by (player,event)."""
+    """Accept a file, a list of files, or a folder; parse each PDF/JSON; dedupe by (player,event)."""
     files = []
     if isinstance(paths, str):
         paths = [paths]
     for p in paths:
         if os.path.isdir(p):
             files += sorted(glob.glob(os.path.join(p, "*.pdf")))
+            files += sorted(glob.glob(os.path.join(p, "*.json")))
         else:
             files.append(p)
     reports, seen = [], set()
     for f in files:
         try:
-            r = NP.parse(f)
+            r = _parse_any(f)
         except Exception:
             continue
         key = (str(r.get("player")).lower(), str(r.get("event")).lower())

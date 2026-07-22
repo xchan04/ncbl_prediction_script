@@ -17,7 +17,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import matplotlib.cm as cm
 
 from . import standings as S
 from . import points as P
@@ -141,7 +140,7 @@ def overview(league, cfg, player, out, t_from=None, t_to=None, fps=60):
     snaps, rk, players, series, tnames, nmax = _bumpbase(league, cfg, t_from, t_to)
     def firstlast(p):
         seq = [series[p][i] for i in range(len(snaps)) if series[p][i] is not None]; return seq[0], seq[-1]
-    G, R = cm.get_cmap("Greens"), cm.get_cmap("Reds")
+    G, R = matplotlib.colormaps["Greens"], matplotlib.colormaps["Reds"]
     pcol = {}
     for p in players:
         if p == player: pcol[p] = th["player"]; continue
@@ -197,7 +196,7 @@ def montecarlo(league, cfg, player, out, rols=8, cols=14, fps=40, dur=7.0, targe
         isme = [False]*(BARS-1)+[True]
         order = sorted(range(BARS), key=lambda j:-vals[j]); vals=[vals[j] for j in order]; isme=[isme[j] for j in order]
         r, c = divmod(i, cols); tiles.append((r, c, vals, isme, rng.uniform(0,0.45)))
-    N = int(fps*dur); G = cm.get_cmap("summer")
+    N = int(fps*dur); G = matplotlib.colormaps["summer"]
     fig, ax = plt.subplots(figsize=(16,9)); fig.subplots_adjust(left=0.01,right=0.99,top=0.90,bottom=0.02)
     def draw(fi):
         ax.clear(); prog = fi/(N-1); ys=[];ws=[];lefts=[];colu=[];hs=[]

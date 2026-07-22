@@ -142,6 +142,23 @@ def test_community_benchmark_empty_with_only_you():
     assert "community benchmark unlocks" in C.coach_txt(res).lower()
 
 
+def test_field_benchmark_ranks_you_vs_peers():
+    peers = [
+        {"combo": "Aero 1-60 Rush", "player": "YOU", "win_pct": 40.0, "ppb": 0.0, "battles": 10},
+        {"combo": "Aero 1-60 Rush", "player": "rivalA", "win_pct": 70.0, "ppb": 0.6, "battles": 12},
+        {"combo": "Aero 1-60 Rush", "player": "rivalB", "win_pct": 65.0, "ppb": 0.5, "battles": 8},
+    ]
+    reps = [_rep("A", combos=[("Aero 1-60 Rush", 40, 0.0, 10, "B")], peers=peers)]
+    res = C.coach(reps, "espiiii")
+    f = next((x for x in res["field"] if "Aero" in x["combo"]), None)
+    assert f is not None
+    assert f["you"] == 40.0
+    assert f["gap"] < 0                                # below field average
+    assert f["standing"] == "bottom-third"             # you beat 0 of 2 peers
+    assert f["best_peer"] == "rivalA"
+    assert "FIELD BENCHMARK" in C.coach_txt(res)
+
+
 def test_goal_card_summarizes_form_and_objectives():
     reps = _reports()
     reps[0]["totals"] = {"win_pct": 55.0, "placement": "5th"}

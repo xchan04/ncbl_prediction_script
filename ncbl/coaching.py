@@ -320,6 +320,40 @@ def nemesis_dossier(reports, player, rivals):
     return dossier
 
 
+# ---------------- field benchmark per combo ----------------
+def field_benchmark(reports, player, agg):
+    """For every combo you run, your win% vs the field of everyone who ran the same combo.
+
+    Uses the NCBLAST peer-comparison rows (your combo vs each peer on that combo). Reports
+    your standing (top / middle / bottom third) so you can see which combos you over- or
+    under-pilot relative to the field — the on-ramp for cross-player combo comparison.
+    """
+    mine = [r for r in reports if str(r.get("player", "")).lower() == player]
+    peer_rows = defaultdict(list)
+    for r in mine:
+        for p in r["peers"]:
+            if p.get("combo") and p.get("player"):
+                peer_rows[p["combo"]].append(p)
+    out = []
+    for combo, rows in peer_rows.items():
+        peers = [x for x in rows if x["player"] != "YOU"]
+        you = agg["combos"].get(combo)
+        if not peers or not you or you["battles"] < MIN_COMBO_BATTLES:
+            continue
+        fb = sum(x["battles"] for x in peers) or 1
+        field_avg = round(sum(x["win_pct"] * x["battles"] for x in peers) / fb, 1)
+        best = max(peers, key=lambda x: x["win_pct"])
+        beat = sum(1 for x in peers if you["win_pct"] > x["win_pct"])
+        pct_rank = round(100 * beat / len(peers))
+        standing = "top-third" if pct_rank >= 66 else "bottom-third" if pct_rank <= 33 else "middle"
+        out.append({"combo": combo, "you": you["win_pct"], "field_avg": field_avg,
+                    "gap": round(you["win_pct"] - field_avg, 1), "best_peer": best["player"],
+                    "best_win": best["win_pct"], "n_peers": len(peers), "battles": you["battles"],
+                    "pct_rank": pct_rank, "standing": standing})
+    out.sort(key=lambda z: z["gap"])          # worst-vs-field first
+    return out
+
+
 # ---------------- confidence ----------------
 def confidence(agg):
     e, b = agg["n_events"], agg["total_battles"]
@@ -458,6 +492,7 @@ def coach(reports, player, scope="lifetime"):
     recommendation = recommend(agg, meta)
     goal = goal_card(reports, player, agg, weaknesses, recommendation, benchmarks)
     nemeses = nemesis_dossier(reports, player, rivals)
+    field = field_benchmark(reports, player, agg)
 
     return {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
@@ -466,7 +501,7 @@ def coach(reports, player, scope="lifetime"):
             "rivals": rivals, "recommendation": recommendation,
             "launch": launch, "side": agg.get("side") or {},
             "benchmarks": benchmarks, "community": {"n_players": comm["n_players"]},
-            "goal": goal, "nemeses": nemeses,
+            "goal": goal, "nemeses": nemeses, "field": field,
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -702,6 +737,12 @@ def coach_txt(d):
     L.append("\nMETA — field you keep facing")
     for m in d["meta"]:
         L.append(f"  * {m['text']}")
+    L.append("\nFIELD BENCHMARK — your combos vs everyone who runs them")
+    for f in d.get("field", []):
+        L.append(f"  {f['combo']:32} you {f['you']}% vs field {f['field_avg']}% "
+                 f"[{f['gap']:+}%, {f['standing']}, best {f['best_peer']} {f['best_win']}%]")
+    if not d.get("field"):
+        L.append("  (no shared-combo peer data in these reports)")
     return "\n".join(L) + "\n"
 
 
@@ -821,6 +862,25 @@ def coach_html(d, cfg, image_path=None):
                     if d.get("nemeses") else
                     f'<h2>Nemesis dossier</h2><div class="sub">No nemesis yet — you\'re even-or-better vs everyone with a sample.</div>')
 
+    # field benchmark per combo — you vs everyone who runs the same combo
+    stand_col = {"top-third": green, "middle": orange, "bottom-third": red}
+    field_rows = "".join(
+        f'<tr><td>{e(f["combo"])}</td>'
+        f'<td style="text-align:right">{f["you"]}%</td>'
+        f'<td style="text-align:right;color:{muted}">{f["field_avg"]}%</td>'
+        f'<td style="text-align:right;color:{green if f["gap"]>=0 else red}">{f["gap"]:+}%</td>'
+        f'<td style="text-align:center;color:{stand_col.get(f["standing"], muted)}">{e(f["standing"])}</td>'
+        f'<td style="text-align:right;color:{muted}">{e(f["best_peer"])} {f["best_win"]}%</td></tr>'
+        for f in d.get("field", []))
+    if field_rows:
+        field_html = ('<h2>Field benchmark — your combos vs the field</h2>'
+                      '<table><thead><tr><th>Combo</th><th style="text-align:right">You</th>'
+                      '<th style="text-align:right">Field avg</th><th style="text-align:right">Gap</th>'
+                      '<th style="text-align:center">Standing</th><th style="text-align:right">Best peer</th>'
+                      f'</tr></thead><tbody>{field_rows}</tbody></table>')
+    else:
+        field_html = '<h2>Field benchmark</h2><div class="sub">No shared-combo peer data in these reports.</div>'
+
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
         f'<td style="text-align:right">{c["win_pct"]}%</td><td style="text-align:right">{c["ppb"]:+}</td>'
@@ -865,6 +925,7 @@ def coach_html(d, cfg, image_path=None):
    <tbody>{rival_rows}</tbody></table>
  {nemeses_html}
  {meta}
+ {field_html}
  {img_html}
  <h2>Your combos (all events)</h2>
  <table><thead><tr><th>Combo</th><th style="text-align:center">Tier</th><th style="text-align:right">Win%</th>

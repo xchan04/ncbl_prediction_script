@@ -69,6 +69,21 @@ def _avg_jaccard(decks):
     return round(100 * sum(sims) / len(sims)) if sims else None
 
 
+def _unique_decks(match_lists):
+    """Collapse the deck history to DISTINCT decks (order-independent) with how often each ran.
+    Two matches with the same combos in a different slot order = one deck, not two."""
+    seen, order = {}, []
+    for combos in match_lists:
+        key = frozenset(combos)
+        if key not in seen:
+            seen[key] = {"combos": list(dict.fromkeys(combos)), "times": 0}
+            order.append(key)
+        seen[key]["times"] += 1
+    decks = [seen[k] for k in order]
+    decks.sort(key=lambda d: -d["times"])
+    return decks
+
+
 # ---------------- opponent scouting / shuffle prediction ----------------
 def _opp_decks(reports, player):
     """opponent player -> list of per-match combo lists (from the subject's recaps)."""
@@ -203,7 +218,7 @@ def opponent_scout(reports, player, agg, community=None, meta=None, min_matches=
                     "predictability": pred, "pred_label": pred_label, "pred_color": pred_color,
                     "meta_style": mstyle, "watch": _watch(pred, pred_label, mstyle),
                     "source": source, "readout": readout, "answers": answers,
-                    "decks_faced": [list(c) for c in match_lists]})
+                    "decks_faced": _unique_decks(match_lists)})
     return out
 
 
@@ -283,8 +298,9 @@ def to_txt(p):
                  f"[{s['pred_label']} {pr}]{mtag}")
         if not s["readout"]:
             L.append("     ??? ??? ???")
-            for i, deck in enumerate(s["decks_faced"], 1):
-                L.append(f"       deck {i}: {' · '.join(deck)}")
+            for i, d in enumerate(s["decks_faced"], 1):
+                tag = f" (seen {d['times']}x)" if d["times"] > 1 else ""
+                L.append(f"       deck {i}{tag}: {' · '.join(d['combos'])}")
         else:
             L.append("     " + "  ·  ".join(_pick_txt(pk) for pk in s["readout"]))
         for a in s["answers"]:
@@ -347,9 +363,11 @@ def to_html(p, theme):
             mtag = f' <span class="tag" style="border-color:{mc};color:{mc}">{e(s["meta_style"]["tag"])} {s["meta_style"]["pct"]}%</span>'
         head = (f'<b>{e(s["opponent"])}</b> {box}{mtag} '
                 f'<span class="sub">— you {e(s["record"])} / {s["matches"]} matches</span>')
-        decks_popup = ("<details><summary>decks faced</summary>"
-                       + "".join(f'<div class="sub">deck {i}: {e(" · ".join(dk))}</div>'
-                                 for i, dk in enumerate(s["decks_faced"], 1)) + "</details>")
+        decks = s["decks_faced"]
+        popup_rows = "".join(
+            f'<div class="sub">deck {i}{(" (seen " + str(d["times"]) + "x)") if d["times"] > 1 else ""}: {e(" · ".join(d["combos"]))}</div>'
+            for i, d in enumerate(decks, 1))
+        decks_popup = (f'<details><summary>decks faced ({len(decks)} unique)</summary>{popup_rows}</details>')
         if not s["readout"]:
             body = (f'<div style="margin:6px 0;font-size:18px;letter-spacing:2px;color:{red}">??? ??? ???</div>'
                     f'{decks_popup}')
@@ -361,7 +379,12 @@ def to_html(p, theme):
         watch = "".join(f'<div class="nudge">▲ {e(w)}</div>' for w in s.get("watch", []))
         src = f'<div class="sub" style="color:{muted}">source: {e(s["source"])}</div>' if s["source"] != "your matches" else ""
         cards += f'<div class="card">{head}{body}{answers}{watch}{src}</div>'
-    scouting_html = f'<h2>Rival scouting — shuffle prediction{bd}</h2>' + (cards or '<div class="sub">No opponent faced 2+ times yet.</div>')
+    legend = ('<div class="sub" style="margin-bottom:8px">How to read: the colored box is '
+              '<b>predictability</b> (green = same deck every time → readable, yellow = keeps a core but '
+              'flexes, red = unpredictable). <b>meta / anti-meta</b> = how much of their kit is in the current '
+              'field meta. Combos with a % = how often they bring it; no % = every match. Click '
+              '<i>decks faced</i> for their distinct decks (same combos in a different order count as one).</div>')
+    scouting_html = f'<h2>Rival scouting — shuffle prediction{bd}</h2>' + legend + (cards or '<div class="sub">No opponent faced 2+ times yet.</div>')
 
     sr = p.get("self_read") or {}
     rows = "".join(f'<tr><td>{e(b["blade"])}</td><td style="text-align:right">{b["pct"]}%</td>'
@@ -381,9 +404,14 @@ def to_html(p, theme):
             f'<td style="color:{green}">{("bring " + e(r["answer"]["bring"]) + " (" + e(r["answer"]["record"]) + ")") if r["answer"] else ""}</td></tr>'
             for r in mc["rows"])
         gaps = f'<div class="sub" style="color:{red}">Unanswered meta: {e(", ".join(mc["gaps"]))}</div>' if mc["gaps"] else ""
+        mlegend = ('<div class="sub" style="margin:4px 0 2px">Columns: <b>Field</b> = top-3 finishes in the '
+                   'meta snapshot (how popular the combo is) · <b>You</b> = your battle record vs it ('
+                   '"—" = no data yet) · <b>Your answer</b> = the combo in your deck with the best record vs it '
+                   '(blank = no winning answer — a gap).</div>')
         meta_html = (f'<h2>Meta counter — field snapshot</h2>'
                      f'<div class="sub">{mc.get("entries")} entries · {e(str(mc.get("generated")))} · '
                      f'top blades {e(", ".join(mc["top_blades"]))} · top ratchets {e(", ".join(mc["top_ratchets"]))}</div>'
+                     f'{mlegend}'
                      f'<table><thead><tr><th>Field combo</th><th style="text-align:center">Field</th>'
                      f'<th style="text-align:center">You</th><th>Your answer</th></tr></thead><tbody>{mrows}</tbody></table>'
                      f'{gaps}<div class="nudge">Coverage: winning answer to {mc["covered"]}/{mc["of"]} top field combos</div>'

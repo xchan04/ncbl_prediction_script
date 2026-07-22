@@ -188,18 +188,53 @@ def cmd_setup(args):
         with open(run_md, "w") as fh:
             fh.write(_RUN_MD.format(user=args.username))
 
+    # runner scripts (edit-the-vars-or-just-double-click), pre-wired to this workspace
+    pipeline_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _write_runners(root, pipeline_dir, force=args.force)
+
     print(f"Workspace ready: {root}/")
     print("  ncbl.config.json   ← your username + sheet link (edit the season tab names if needed)")
     print("  reports/           ← drop .pdf / .json tournament reports here")
     print("  meta/              ← drop the field Meta Analysis .json here")
     print("  out/               ← reports are written here")
     print("  RUN.md             ← copy-paste commands")
+    print("  install + run_lifetime + run_season + run_all  (.sh for mac/linux, .bat for Windows)")
     if not args.ranking_sheet_url:
         print("\nNext: paste your Google Sheet link into ncbl.config.json (ranking_sheet_url),")
         print("      shared 'Anyone with the link -> Viewer'.")
     print(f"\nThen, from inside {root}/:")
-    print("  python -m ncbl standings --config ncbl.config.json")
-    print("  python -m ncbl coach     --config ncbl.config.json --outdir out")
+    print("  ./install.sh          (Windows: install.bat)   # one-time")
+    print("  ./run_lifetime.sh     (Windows: run_lifetime.bat)")
+
+
+def _write_runners(root, pipeline_dir, force=False):
+    """Drop install + lifetime/season/both runner scripts into the workspace."""
+    files = {
+        "install.sh": (_SH_INSTALL.format(pipeline=pipeline_dir), True),
+        "run_lifetime.sh": (_SH_RUN.format(title="LIFETIME coaching report", season_line="",
+                                           coach='ncbl coach --config "$CONFIG" --outdir "$OUT"',
+                                           out="out/lifetime"), True),
+        "run_season.sh": (_SH_RUN.format(title="SEASON coaching report", season_line='SEASON="2026 Season 6"',
+                                         coach='ncbl coach --config "$CONFIG" --season "$SEASON" --outdir "$OUT"',
+                                         out="out/season"), True),
+        "run_all.sh": (_SH_ALL, True),
+        "install.bat": (_BAT_INSTALL.format(pipeline=pipeline_dir), False),
+        "run_lifetime.bat": (_BAT_RUN.format(title="LIFETIME coaching report", season_set="",
+                                             coach="ncbl coach --config %CONFIG% --outdir %OUT%",
+                                             out="out\\lifetime"), False),
+        "run_season.bat": (_BAT_RUN.format(title="SEASON coaching report", season_set='set "SEASON=2026 Season 6"',
+                                           coach='ncbl coach --config %CONFIG% --season "%SEASON%" --outdir %OUT%',
+                                           out="out\\season"), False),
+        "run_all.bat": (_BAT_ALL, False),
+    }
+    for name, (content, executable) in files.items():
+        path = os.path.join(root, name)
+        if os.path.exists(path) and not force:
+            continue
+        with open(path, "w", newline="\n") as fh:
+            fh.write(content)
+        if executable:
+            os.chmod(path, 0o755)
 
 
 _RUN_MD = """\
@@ -235,6 +270,102 @@ python -m ncbl coach     --config ncbl.config.json --outdir out                 
 python -m ncbl coach     --config ncbl.config.json --season "2026 Season 6" --outdir out
 ```
 Outputs land in `out/`. The more reports you add, the more comprehensive the coaching gets.
+"""
+
+
+# ---- runner script templates (generated into the workspace by `ncbl setup`) ----
+_SH_INSTALL = """\
+#!/usr/bin/env bash
+# One-time install. Run:  ./install.sh
+# Edit PIPELINE if you moved the ncbl_prediction_script repo.
+set -e
+cd "$(dirname "$0")"
+PIPELINE="{pipeline}"
+
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e "$PIPELINE"
+echo
+echo "Installed. Next:"
+echo "  1) edit ncbl.config.json -> paste your Google Sheet link (ranking_sheet_url)"
+echo "  2) drop reports into reports/  and the meta export into meta/"
+echo "  3) ./run_lifetime.sh   (or ./run_season.sh / ./run_all.sh)"
+"""
+
+_SH_RUN = """\
+#!/usr/bin/env bash
+# {title}. Run:  ./THIS_FILE.sh
+set -e
+cd "$(dirname "$0")"
+# ---- edit if you like ----
+CONFIG="ncbl.config.json"
+OUT="{out}"
+{season_line}
+# --------------------------
+[ -d .venv ] && . .venv/bin/activate
+{coach}
+echo "Done -> $OUT"
+"""
+
+_SH_ALL = """\
+#!/usr/bin/env bash
+# Lifetime + season coaching, plus the ranking report/standings (needs the sheet link). Run: ./run_all.sh
+set -e
+cd "$(dirname "$0")"
+CONFIG="ncbl.config.json"
+SEASON="2026 Season 6"
+[ -d .venv ] && . .venv/bin/activate
+ncbl coach  --config "$CONFIG" --outdir out/lifetime
+ncbl coach  --config "$CONFIG" --season "$SEASON" --outdir out/season
+ncbl report --config "$CONFIG" --outdir out/lifetime || echo "(ranking report skipped — set ranking_sheet_url in $CONFIG)"
+ncbl standings --config "$CONFIG" > out/standings.txt 2>/dev/null || true
+echo "Done -> out/lifetime, out/season"
+"""
+
+_BAT_INSTALL = """\
+@echo off
+REM One-time install. Double-click or run: install.bat
+REM Edit PIPELINE if you moved the ncbl_prediction_script repo.
+cd /d "%~dp0"
+set "PIPELINE={pipeline}"
+
+python -m venv .venv
+call .venv\\Scripts\\activate.bat
+pip install -e "%PIPELINE%"
+echo.
+echo Installed. Next:
+echo   1) edit ncbl.config.json -^> paste your Google Sheet link (ranking_sheet_url)
+echo   2) drop reports into reports\\  and the meta export into meta\\
+echo   3) run_lifetime.bat   (or run_season.bat / run_all.bat)
+pause
+"""
+
+_BAT_RUN = """\
+@echo off
+REM {title}. Double-click or run this .bat
+cd /d "%~dp0"
+set "CONFIG=ncbl.config.json"
+set "OUT={out}"
+{season_set}
+if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat
+{coach}
+echo Done -^> %OUT%
+pause
+"""
+
+_BAT_ALL = """\
+@echo off
+REM Lifetime + season coaching, plus ranking report/standings. Double-click or run: run_all.bat
+cd /d "%~dp0"
+set "CONFIG=ncbl.config.json"
+set "SEASON=2026 Season 6"
+if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat
+ncbl coach  --config %CONFIG% --outdir out\\lifetime
+ncbl coach  --config %CONFIG% --season "%SEASON%" --outdir out\\season
+ncbl report --config %CONFIG% --outdir out\\lifetime
+ncbl standings --config %CONFIG%
+echo Done -^> out\\lifetime, out\\season
+pause
 """
 
 

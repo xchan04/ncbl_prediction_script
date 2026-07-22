@@ -53,6 +53,38 @@ ncbl --help
 ncbl coach --reports ~/Downloads/ --player espiiii --outdir out/
 ```
 
+## Zero to report (scaffold + runner scripts)
+
+New player, from scratch? Let the tool build your workspace:
+```bash
+python -m ncbl setup --username espiiii --ranking-sheet-url "https://docs.google.com/spreadsheets/d/<ID>/edit"
+```
+Creates `espiiii_ncbl/` with `reports/`, `meta/`, `out/`, a prefilled **ncbl.config.json**
+(player + sheet link + season tab names), a **RUN.md**, and **runner scripts** for both platforms:
+
+| Script | Does |
+|---|---|
+| `install.sh` / `install.bat` | one-time: make a venv + install the pipeline |
+| `run_lifetime.sh` / `.bat` | lifetime coaching report → `out/lifetime` |
+| `run_season.sh` / `.bat` | one-season coaching report → `out/season` (edit the `SEASON` line) |
+| `run_all.sh` / `.bat` | lifetime + season + ranking report + standings |
+
+So a player can either **edit the scripts** (they have plain variables up top) and double-click, or
+run the commands by hand. Because everything reads `ncbl.config.json`, the manual commands are short —
+no repeating `--player` / `--input` / `--reports` / `--meta`:
+```bash
+cd espiiii_ncbl
+./install.sh                       # Windows: install.bat   (one-time)
+# drop reports into reports/ and the meta export into meta/, paste your sheet link into the config
+./run_lifetime.sh                  # or ./run_season.sh / ./run_all.sh
+```
+Manual equivalents:
+```bash
+python -m ncbl coach  --config ncbl.config.json --outdir out/lifetime
+python -m ncbl coach  --config ncbl.config.json --season "2026 Season 6" --outdir out/season
+python -m ncbl report --config ncbl.config.json --outdir out/lifetime
+```
+
 ## Get the data
 
 Two options — no code difference, just what you pass to `--input`:

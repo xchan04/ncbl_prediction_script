@@ -218,6 +218,16 @@ The report also includes four platform sections that get richer as more players 
   average of everyone who ran it, with your standing (top / middle / bottom third) and best peer.
 - **Nemesis dossier** — for each player you're sub-.500 against, the builds they beat you with
   and your record vs each (from match recaps).
+- **Rival scouting / shuffle prediction** — for each opponent you've faced 2+ times, a read on the
+  deck they keep bringing and a *predictability %* (deck-repeat rate). Fully repetitive opponents show
+  their exact combos; partly-consistent ones show locked combos plus the likely blade/ratchet/bit with
+  percentages; unpredictable ones are tagged `??? ??? ???` with an expandable history of every deck
+  they've shown you. Includes your best in-deck answer to what they bring.
+- **Self-scout ("how you're read")** — your own blade/combo tendencies, i.e. what opponents likely
+  expect from you (approximated from battle-share; sharpens with per-match slot tracking).
+- **Meta counter** — pass `--meta <field-meta.json>` (a NorCal Beyblade X Meta Analysis export
+  converted to JSON) to get, for the most common field combos, your record and your best answer, plus
+  a coverage score — with a "no meta shift" disclaimer tied to the snapshot date.
 
 ## Challonge head-to-head
 `challonge` pulls match results from Challonge brackets — no combos, but it answers

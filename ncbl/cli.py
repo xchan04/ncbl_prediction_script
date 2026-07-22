@@ -19,6 +19,7 @@ Generate the whole video package:
 """
 from __future__ import annotations
 import argparse
+import json
 import os
 
 from .config import load_config
@@ -143,7 +144,17 @@ def cmd_coach(args):
     players = sorted({str(r["player"]).lower() for r in reports if r.get("player")})
     if not args.player:
         raise SystemExit("error: --player is required. Reports contain: " + ", ".join(players))
-    res = CO.coach(reports, args.player, scope=scope)
+    meta_report = None
+    if getattr(args, "meta", None):
+        try:
+            with open(args.meta, encoding="utf-8") as fh:
+                meta_report = json.load(fh)
+        except Exception as ex:
+            print("(meta report skipped:", ex, ")")
+    community = None
+    if getattr(args, "bd", None):
+        community = CO.load_reports(args.bd)
+    res = CO.coach(reports, args.player, scope=scope, meta_report=meta_report, community=community)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
     img = base + "_matchups.png"
@@ -316,6 +327,8 @@ def main(argv=None):
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
     p.add_argument("--season", metavar="NAME", help="scope to a season window (default: lifetime = all reports)")
+    p.add_argument("--meta", metavar="FILE", help="optional field meta-analysis JSON -> meta-counter picks")
+    p.add_argument("--bd", metavar="PATH", help=argparse.SUPPRESS)   # hidden: full-community prediction pool
     p.set_defaults(func=cmd_coach)
 
     p = sub.add_parser("challonge", help="head-to-head records from Challonge brackets (needs a free API key)")

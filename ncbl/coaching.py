@@ -11,6 +11,7 @@ import os
 from collections import defaultdict
 
 from . import ncblast_parser as NP
+from . import prediction as PRED
 
 MIN_COMBO_BATTLES = 5      # a combo needs this many battles to be judged
 MIN_MATCHUP_FACED = 3      # aggregated encounters before a matchup finding counts
@@ -381,7 +382,7 @@ def _conf(n, hi, mid):
 
 
 # ---------------- analysis ----------------
-def coach(reports, player, scope="lifetime"):
+def coach(reports, player, scope="lifetime", meta_report=None, community=None):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
@@ -502,6 +503,7 @@ def coach(reports, player, scope="lifetime"):
     goal = goal_card(reports, player, agg, weaknesses, recommendation, benchmarks)
     nemeses = nemesis_dossier(reports, player, rivals)
     field = field_benchmark(reports, player, agg)
+    prediction = PRED.build(reports, player, agg, meta=meta_report, community=community)
 
     return {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
@@ -510,7 +512,7 @@ def coach(reports, player, scope="lifetime"):
             "rivals": rivals, "recommendation": recommendation,
             "launch": launch, "side": agg.get("side") or {},
             "benchmarks": benchmarks, "community": {"n_players": comm["n_players"]},
-            "goal": goal, "nemeses": nemeses, "field": field,
+            "goal": goal, "nemeses": nemeses, "field": field, "prediction": prediction,
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -752,6 +754,8 @@ def coach_txt(d):
                  f"[{f['gap']:+}%, {f['standing']}, best {f['best_peer']} {f['best_win']}%]")
     if not d.get("field"):
         L.append("  (no shared-combo peer data in these reports)")
+    if d.get("prediction"):
+        L.append(PRED.to_txt(d["prediction"]))
     return "\n".join(L) + "\n"
 
 
@@ -890,6 +894,8 @@ def coach_html(d, cfg, image_path=None):
     else:
         field_html = '<h2>Field benchmark</h2><div class="sub">No shared-combo peer data in these reports.</div>'
 
+    prediction_html = PRED.to_html(d["prediction"], th) if d.get("prediction") else ""
+
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
         f'<td style="text-align:right">{c["win_pct"]}%</td><td style="text-align:right">{c["ppb"]:+}</td>'
@@ -918,6 +924,7 @@ def coach_html(d, cfg, image_path=None):
  .sug{{color:{muted};font-size:13px;margin:3px 0 0 18px}} .tag{{color:{muted};font-size:11px;border:1px solid {border};border-radius:8px;padding:1px 6px;margin-left:8px}}
  table{{width:100%;border-collapse:collapse;font-size:14px}} th,td{{padding:7px 10px;border-bottom:1px solid {border}}} th{{color:{muted};text-align:left}}
  .nudge{{color:{orange};font-size:13px;margin-top:8px}} .pill{{color:{orange};border:1px solid {orange};border-radius:8px;padding:1px 8px;font-size:12px}}
+ summary{{color:{orange};cursor:pointer;font-size:12px;margin-top:6px}} details{{margin-top:4px}}
 </style></head><body><div class="wrap">
  <h1>{e(d['player'])} <span class="pill">{e(scope)}</span></h1>
  <div class="card"><span class="big">{d['n_events']} event(s) · {c['battles']} battles · confidence
@@ -933,6 +940,7 @@ def coach_html(d, cfg, image_path=None):
  <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>
    <tbody>{rival_rows}</tbody></table>
  {nemeses_html}
+ {prediction_html}
  {meta}
  {field_html}
  {img_html}

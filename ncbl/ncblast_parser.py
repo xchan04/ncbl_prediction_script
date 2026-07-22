@@ -239,25 +239,51 @@ def _archetype(lines):
 
 # ---------------- match recap ----------------
 def _matches(lines):
+    """Parse the per-match recap. Two report layouts exist:
+      * inline  : 'WIN vs Name 2-0 sets · 7 btl · NET +8'  (opponent on the result line)
+      * split   : 'vs Name' on its own line, then 'LOSS 1-2 sets · 14 btl · NET -1'
+                  (the §06 EVERY MATCH layout). The opponent name precedes the result.
+    Both feed the same record; opponent-combo rows that follow attach to the current match.
+    """
     out = []
-    head = re.compile(rf"^(WIN|LOSS)\s+vs\s+(.+?)\s+(\d+){DASH}(\d+)\s+sets\s+[··]\s+(\d+)\s+btl\s+[··]\s+NET\s+({_num})")
+    # inline: result line carries "vs Name"; tolerant of any "· PPB ..." tail after NET
+    head_inline = re.compile(rf"^(WIN|LOSS)\s+vs\s+(.+?)\s+(\d+){DASH}(\d+)\s+sets\b[^\n]*?(\d+)\s*btl[^\n]*?NET\s+({_num})", re.I)
+    # split: result line has no name (name came from a preceding 'vs Name' line)
+    head_split = re.compile(rf"^(WIN|LOSS)\s+(\d+){DASH}(\d+)\s+sets\b[^\n]*?(\d+)\s*btl[^\n]*?NET\s+({_num})", re.I)
+    opp_line = re.compile(r"^vs\s+(\S.*)$", re.I)
     row = re.compile(rf"^(.+?)\s+(\d+){DASH}(\d+)\s+({_num})$")
     cur = None
+    pending_opp = None
     for ln in lines:
         s = ln.strip()
-        h = head.match(s)
+        h = head_inline.match(s)
         if h:
-            cur = {"result": h.group(1), "opponent": h.group(2).strip(),
+            cur = {"result": h.group(1).upper(), "opponent": h.group(2).strip(),
                    "sets": f"{h.group(3)}-{h.group(4)}", "battles": int(h.group(5)),
                    "net": int(float(h.group(6))), "opp_combos": []}
             out.append(cur)
+            pending_opp = None
             continue
-        if cur is not None:
-            m = row.match(s)
-            if m and _looks_like_combo(m.group(1)):
+        h = head_split.match(s)
+        if h:
+            cur = {"result": h.group(1).upper(), "opponent": (pending_opp or "?").strip(),
+                   "sets": f"{h.group(2)}-{h.group(3)}", "battles": int(h.group(4)),
+                   "net": int(float(h.group(5))), "opp_combos": []}
+            out.append(cur)
+            pending_opp = None
+            continue
+        m = row.match(s)
+        if m and _looks_like_combo(m.group(1)):
+            if cur is not None:
                 cur["opp_combos"].append({"combo": _norm(m.group(1)), "wl": f"{m.group(2)}-{m.group(3)}",
                                           "match_ppb": float(m.group(4))})
+            continue
+        # a bare "vs Name" line names the *next* split-layout result
+        o = opp_line.match(s)
+        if o and not _looks_like_combo(s):
+            pending_opp = o.group(1).strip()
     return out
+
 
 
 # ---------------- battle dynamics (side split + points distribution) ----------------

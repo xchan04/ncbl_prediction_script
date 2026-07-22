@@ -29,7 +29,7 @@ def test_locked_opponent_shows_full_combos_no_pct():
             _rep("B", [("Cobalt 9-60 Elevate", 70, 0.5, 10, "S")],
                  [_m("LOSS", "Sol", deck)])]
     s = _scout(C.coach(reps, "me"), "Sol")
-    assert s["predictability"] == 100 and s["pred_label"] == "Complete Certainty"
+    assert s["predictability"] == 100 and s["pred_label"] == "Locked In"
     assert s["pred_color"] == "#39ff14"                      # neon green box
     assert all(pk["kind"] == "combo" and pk["blade_pct"] == 100 for pk in s["readout"])
 
@@ -55,7 +55,7 @@ def test_unpredictable_opponent_is_tagged_with_deck_history():
                  [_m("LOSS", "Cha", ["Blade D 1-70 Flat", "Blade E 5-60 Ball", "Blade F 7-60 Low"])])]
     res = C.coach(reps, "me")
     s = _scout(res, "Cha")
-    assert s["pred_label"] == "Unpredictable" and s["readout"] is None
+    assert s["pred_label"] == "Wild Card" and s["readout"] is None
     assert s["pred_color"] == "#FF3B3B"                       # red
     assert len(s["decks_faced"]) == 2
     assert "??? ??? ???" in C.coach_txt(res)

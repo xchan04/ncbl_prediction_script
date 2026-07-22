@@ -27,14 +27,14 @@ UNPREDICTABLE_UNDER = 25   # below this predictability we show "??? ??? ???"
 # The score blends full-combo repeat with blade repeat, so "keeps blades, swaps ratchets/bits"
 # lands in the middle rather than looking random.
 _PRED_TIERS = [
-    (100, "Complete Certainty", "#39ff14"),   # neon green — never changes the deck
-    (86, "Very Predictable", "#7CFC00"),
-    (72, "Predictable", "#B4E400"),
-    (58, "Somewhat Predictable", "#E4E400"),   # yellow-green
-    (46, "Retains Core", "#FFD400"),           # yellow — 1-2 locked, rest flexes
-    (32, "Somewhat Adapts", "#FFA500"),
-    (18, "Very Adaptable", "#FF6B1A"),
-    (0, "Unpredictable", "#FF3B3B"),           # red — explores, no read
+    (100, "Locked In", "#39ff14"),        # neon green — never changes the deck
+    (86, "Dead Read", "#7CFC00"),
+    (72, "Readable", "#B4E400"),
+    (58, "Leans a Way", "#E4E400"),        # yellow-green
+    (46, "Core + Flex", "#FFD400"),        # yellow — 1-2 locked, rest flexes
+    (32, "Mixes It Up", "#FFA500"),
+    (18, "Shape-Shifter", "#FF6B1A"),
+    (0, "Wild Card", "#FF3B3B"),           # red — explores, no read
 ]
 
 
@@ -44,7 +44,7 @@ def _pred_tier(pct):
     for lo, label, color in _PRED_TIERS:
         if pct >= lo:
             return (label, color)
-    return ("Unpredictable", "#FF3B3B")
+    return ("Wild Card", "#FF3B3B")
 
 
 

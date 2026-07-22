@@ -14,7 +14,7 @@ comes from the inputs below; missing inputs simply mean the matching sections ar
 | 2 | **League spreadsheet** (`.xlsx` or the Data-Entry/Rankings `.csv`s) | `--input` | Standings, predictions, threats, ranking report, videos |
 | 3 | **Season length / windows** | `config.seasons` | Seasonal vs lifetime scoping; how much runway remains |
 | 4 | **Tournament schedule** (accurate *or* estimated) | `config.schedule` | Prediction accuracy (see below) |
-| 5 | **NCBLAST report PDFs** | `--reports` | Coaching: weaknesses, meta, matchup swaps, **next-deck recommendation**, rivals, matchup visual |
+| 5 | **NCBLAST report PDFs** | `--reports` | Coaching: goal card, weaknesses, launch/positioning (B vs X), meta, matchup swaps, **next-deck recommendation**, community & field benchmarks, rivals + nemesis dossier, matchup visual |
 | 6 | **Challonge links + free API key** | `--from-sheet` / `--slugs` + `--api-key` | Head-to-head ("who keeps beating you"), coverage for tournaments **without** a report |
 
 **Minimum to get something useful:** username + spreadsheet.
@@ -61,8 +61,9 @@ Set `config.seasons` windows (name → `["start","end"]`). This drives:
 | You provide… | You get… |
 |---|---|
 | Spreadsheet + season + schedule | Standings, "what do I need for Top-N", threats, ranking report, videos |
-| …+ **1 report PDF** | Basic coaching (Bronze confidence): combo win rates, one event's matchups, a tentative next-deck |
-| …+ **several report PDFs** | Gold-confidence coaching: confirmed weaknesses, finish vulnerabilities, meta you keep facing, a **legal part-unique next-deck recommendation**, cross-event trends, rivals |
+| …+ **1 report PDF** | Basic coaching (Bronze confidence): goal card, combo win rates, launch/positioning split, one event's matchups, a tentative next-deck |
+| …+ **several report PDFs** | Gold-confidence coaching: confirmed weaknesses, finish vulnerabilities, meta you keep facing, a **legal part-unique next-deck recommendation**, cross-event trends, field benchmark per combo, rivals + nemesis dossier |
+| …+ **other players' report PDFs** | **Community matchup benchmark** — your win% per matchup vs the field's (only fires once other players are in the pool) |
 | …+ **Challonge (API key)** | Head-to-head "nemeses", coverage for report-less tournaments, rival records folded into the ranking report |
 | …+ **reports/brackets across seasons** | True **lifetime** view alongside the **seasonal** one |
 

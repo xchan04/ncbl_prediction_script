@@ -177,6 +177,19 @@ on your best-performing combos (win% + PPB + tier), rewards combos with winning 
 combos you keep facing, benches your negative-PPB combos, and flags meta combos you have no
 answer for. All from the report numbers — no AI, no external part database.
 
+The report also includes four platform sections that get richer as more players plug in:
+- **Goal card** — a crisp finish-line summary: form (win%/PPB), win% trajectory across events,
+  placements, and up to three concrete next objectives synthesized from your top findings.
+- **Launch & positioning** — your B-side vs X-side win%/PPB split; a large, battle-backed gap
+  flags a coachable habit (favor the strong side, drill the weak one).
+- **Vs the field (community benchmark)** — your win% per matchup against the field's aggregate
+  (field excludes your own games), so it only fires once *other* players' reports are pooled;
+  single-player runs show an honest "unlocks when others plug in" note.
+- **Field benchmark per combo** — for each combo you run, your win% vs the battle-weighted field
+  average of everyone who ran it, with your standing (top / middle / bottom third) and best peer.
+- **Nemesis dossier** — for each player you're sub-.500 against, the builds they beat you with
+  and your record vs each (from match recaps).
+
 ## Challonge head-to-head
 `challonge` pulls match results from Challonge brackets — no combos, but it answers
 "who keeps beating me" and covers tournaments that never published an NCBL report.

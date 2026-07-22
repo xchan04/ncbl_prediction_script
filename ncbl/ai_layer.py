@@ -46,22 +46,30 @@ def _compact(res):
                     "btl": v.get("battles"), "trend": v.get("trend")}
                 for k, v in d.items()}
     pred = res.get("prediction") or {}
+    rec = res.get("recommendation") or {}
     scouting = [{"opp": s["opponent"], "record": s["record"], "predictability": s["predictability"],
                  "label": s["pred_label"], "meta": (s.get("meta_style") or {}).get("tag"),
                  "likely": [p.get("combo") for p in (s.get("readout") or [])][:4]}
                 for s in pred.get("scouting", [])]
+    goal = dict(res.get("goal") or {})
+    # win_seq is already date-sorted by goal_card; expose the labeled trajectory explicitly
+    # so the model reads form chronologically (latest event = last entry), not in load order.
     return {
         "player": res.get("player"), "scope": res.get("scope"),
         "events": res.get("events"), "confidence": res.get("confidence"),
         "archetype": res.get("archetype"), "style": res.get("style"),
-        "goal": res.get("goal"), "combos": combos(res.get("combos", {})),
+        "goal": goal, "trajectory_by_date": goal.get("trajectory"),
+        "combos": combos(res.get("combos", {})),
         "loss_finishes": res.get("loss_finishes"),
         "weaknesses": [{"t": w["text"], "fix": w["suggestion"], "sev": w["severity"]} for w in res.get("weaknesses", [])],
         "strengths": [s["text"] for s in res.get("strengths", [])],
         "swaps": res.get("swaps"), "meta_field": res.get("meta"),
-        "recommendation": {"deck": [d["combo"] for d in (res.get("recommendation") or {}).get("deck", [])],
-                           "bench": [b["combo"] for b in (res.get("recommendation") or {}).get("bench", [])],
-                           "note": (res.get("recommendation") or {}).get("note")},
+        "recommendation": {"deck": [d["combo"] for d in rec.get("deck", [])],
+                           "bench": [b["combo"] for b in rec.get("bench", [])],
+                           "note": rec.get("note"),
+                           # combos excluded from the deck by the 3v3 no-shared-part rule —
+                           # tells the model why the higher-tier combo isn't in the deck.
+                           "part_conflicts": rec.get("part_conflicts")},
         "rivals": [{"p": r["player"], "rec": f"{r['wins']}-{r['losses']}", "src": r.get("source")}
                    for r in res.get("rivals", [])],
         "nemeses": res.get("nemeses"), "launch": res.get("launch"),

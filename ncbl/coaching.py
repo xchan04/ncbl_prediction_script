@@ -283,9 +283,22 @@ def goal_card(reports, player, agg, weaknesses, rec, benchmarks):
     top fixable leaks, the recommended engine, and the most winnable field matchup.
     """
     mine = [r for r in reports if str(r.get("player", "")).lower() == player]
-    seq = [r["totals"].get("win_pct") for r in mine if r.get("totals", {}).get("win_pct") is not None]
-    placements = [r["totals"].get("placement") for r in mine if r.get("totals", {}).get("placement")]
     overall = _wmerge([(c["win_pct"], c["ppb"], c["battles"]) for c in agg["combos"].values()]) if agg["combos"] else {"win_pct": 0, "ppb": 0, "battles": 0}
+
+    # trajectory in CHRONOLOGICAL order (reports may load in any order); undated events keep
+    # their load position so the sort is stable.
+    rows = []
+    for i, r in enumerate(mine):
+        wp = r.get("totals", {}).get("win_pct")
+        if wp is None:
+            continue
+        rows.append({"date": _date_iso(r.get("date")), "_i": i, "event": r.get("event"),
+                     "win_pct": wp, "placement": r.get("totals", {}).get("placement")})
+    rows.sort(key=lambda z: (z["date"] or "9999", z["_i"]))
+    trajectory = [{"date": z["date"], "event": z["event"], "win_pct": z["win_pct"],
+                   "placement": z["placement"]} for z in rows]
+    seq = [z["win_pct"] for z in rows]                         # now date-ordered
+    placements = [z["placement"] for z in rows if z["placement"]]
     trend = None
     if len(seq) >= 2:
         d = seq[-1] - seq[0]
@@ -304,7 +317,7 @@ def goal_card(reports, player, agg, weaknesses, rec, benchmarks):
         objectives.append("Keep feeding reports — more data sharpens every recommendation.")
     return {"win_pct": overall["win_pct"], "ppb": overall["ppb"], "battles": overall["battles"],
             "events": len(mine), "placements": placements, "win_seq": seq, "trend": trend,
-            "objectives": objectives[:3]}
+            "trajectory": trajectory, "objectives": objectives[:3]}
 
 
 def nemesis_dossier(reports, player, rivals):
@@ -414,11 +427,11 @@ def coach(reports, player, scope="lifetime", meta_report=None, community=None,
                 r["losses"] += h.get("losses", 0)
                 r["played"] = r["wins"] + r["losses"]
                 r["win_pct"] = round(100 * r["wins"] / max(1, r["played"]), 1)
-                r["source"] = "reports+challonge"
+                r["source"] = "reports+h2h"
             else:
                 w2, l2 = h.get("wins", 0), h.get("losses", 0)
                 rivals.append({"player": h["opponent"], "wins": w2, "losses": l2, "played": w2 + l2,
-                               "win_pct": round(100 * w2 / max(1, w2 + l2), 1), "source": "challonge"})
+                               "win_pct": round(100 * w2 / max(1, w2 + l2), 1), "source": "h2h"})
     rivals.sort(key=lambda r: (r["wins"] - r["losses"], -r["played"]))
 
     # combo strengths / liabilities
@@ -773,10 +786,10 @@ def coach_txt(d):
     L.append(f"\nRIVALS — your head-to-head ({d.get('scope','lifetime')})")
     for r in d.get("rivals", []):
         tag = "  <-- nemesis" if r["losses"] > r["wins"] and r["played"] >= 2 else ""
-        if r.get("source") == "challonge":
-            tag += "  [challonge only]"
-        elif r.get("source") == "reports+challonge":
-            tag += "  [+challonge]"
+        if r.get("source") == "h2h":
+            tag += "  [h2h only]"
+        elif r.get("source") == "reports+h2h":
+            tag += "  [+h2h]"
         L.append(f"  {r['player']:20} {r['wins']}-{r['losses']}  ({r['win_pct']}%, {r['played']} sets){tag}")
     if not d.get("rivals"):
         L.append("  (no match-recap data in these reports)")
@@ -798,6 +811,9 @@ def coach_txt(d):
         L.append("  (no shared-combo peer data in these reports)")
     if d.get("prediction"):
         L.append(PRED.to_txt(d["prediction"]))
+    if d.get("ai_notes"):
+        from . import ai_layer as _AI
+        L.append(_AI.to_txt(d["ai_notes"]))
     return "\n".join(L) + "\n"
 
 
@@ -897,7 +913,7 @@ def coach_html(d, cfg, image_path=None):
     recommendation = f'<h2>Recommended next-tournament deck</h2>{deck_rows}{rec_extra}'
 
     # rivals (head-to-head vs players), nemeses highlighted
-    _src = {"challonge": " · challonge", "reports+challonge": " · +challonge"}
+    _src = {"h2h": " · h2h", "reports+h2h": " · +h2h"}
     rival_rows = "".join(
         f'<tr><td>{e(r["player"])}<span style="color:{muted};font-size:11px">{_src.get(r.get("source"), "")}</span></td>'
         f'<td style="text-align:right;color:{green if r["wins"]>=r["losses"] else red}">{r["wins"]}-{r["losses"]}</td>'
@@ -938,6 +954,10 @@ def coach_html(d, cfg, image_path=None):
         field_html = '<h2>Field benchmark</h2><div class="sub">No shared-combo peer data in these reports.</div>'
 
     prediction_html = PRED.to_html(d["prediction"], th) if d.get("prediction") else ""
+    ai_html = ""
+    if d.get("ai_notes"):
+        from . import ai_layer as _AI
+        ai_html = _AI.to_html(d["ai_notes"], th)
 
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
@@ -968,6 +988,8 @@ def coach_html(d, cfg, image_path=None):
  table{{width:100%;border-collapse:collapse;font-size:14px}} th,td{{padding:7px 10px;border-bottom:1px solid {border}}} th{{color:{muted};text-align:left}}
  .nudge{{color:{orange};font-size:13px;margin-top:8px}} .pill{{color:{orange};border:1px solid {orange};border-radius:8px;padding:1px 8px;font-size:12px}}
  summary{{color:{orange};cursor:pointer;font-size:12px;margin-top:6px}} details{{margin-top:4px}}
+ .ai{{border-left:3px solid {orange};background:#140d05;padding:10px 16px;margin:8px 0;border-radius:0 8px 8px 0;font-size:14px}}
+ .ai h3{{color:#ffb454;font-size:15px;border:0;margin:12px 0 4px}} .ai h4{{color:#ffb454;font-size:13px;margin:8px 0 2px}} .ai li{{margin:2px 0}}
 </style></head><body><div class="wrap">
  <h1>{e(d['player'])} <span class="pill">{e(scope)}</span></h1>
  <div class="card"><span class="big">{_events_str(c)} · {c['battles']} battles · confidence
@@ -975,6 +997,7 @@ def coach_html(d, cfg, image_path=None):
    <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
    <div class="nudge">▲ {e(_coverage_note(c))}</div></div>
  {goal_html}
+ {ai_html}
  {recommendation}
  {strengths}{weaknesses}{swaps}
  {benchmarks_html}

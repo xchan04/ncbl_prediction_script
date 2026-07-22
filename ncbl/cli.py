@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 
 from .config import load_config
 from .loader import League
@@ -183,6 +184,11 @@ def cmd_setup(args):
         with open(cfg_path, "w") as fh:
             json.dump(scaffold, fh, indent=2)
 
+    links_path = os.path.join(root, "challonge_links.txt")
+    if not os.path.exists(links_path) or args.force:
+        with open(links_path, "w") as fh:
+            fh.write(_LINKS_TXT.format(user=args.username))
+
     run_md = os.path.join(root, "RUN.md")
     if not os.path.exists(run_md) or args.force:
         with open(run_md, "w") as fh:
@@ -274,6 +280,18 @@ python -m ncbl coach     --config ncbl.config.json --season "2026 Season 6" --ou
 Outputs land in `out/`. The more reports you add, the more comprehensive the coaching gets.
 """
 
+_LINKS_TXT = """\
+# {user} — Challonge bracket links (one per line, one per tournament)
+# Paste the full URL for every tournament you played — even ones with no NCBLAST report.
+# Example:
+#   https://ncbl.challonge.com/goonday
+#   https://challonge.com/abcd1234
+# Lines starting with # are ignored. These fill your head-to-head record (who beat you,
+# who you beat) for tournaments that never published a report. Challonge has no combo/deck
+# data — decks are still inferred from your reports + history.
+
+"""
+
 
 # ---- runner script templates (generated into the workspace by `ncbl setup`) ----
 _SH_INSTALL = """\
@@ -327,31 +345,32 @@ echo "Done -> out/lifetime, out/season"
 _SH_FULL = """\
 #!/usr/bin/env bash
 # FULL run: Top-10 grind (ranking) + coaching + Challonge head-to-head. Run: ./run_full.sh
-# Coaching confidence uses the sheet's TRUE event count (even events with no report).
+# Coaching confidence uses the sheet's TRUE event count (even events with no report),
+# and Challonge fills your head-to-head for tournaments that never published a report.
 set -e
 cd "$(dirname "$0")"
 CONFIG="ncbl.config.json"
 SEASON="2026 Season 6"
-# ---- optional: Challonge head-to-head (fills matches for tournaments with no report) ----
-CHALLONGE_API_KEY=""     # free key: challonge.com -> Developer API
-SHEET=""                 # sheet URL/path that contains the Challonge bracket links
+LINKS="challonge_links.txt"        # paste your bracket links in this file (one per tournament)
+CHALLONGE_API_KEY=""               # free key: challonge.com -> Developer API (needed once to fetch; then cached)
 # -----------------------------------------------------------------------------------------
 [ -d .venv ] && . .venv/bin/activate
 mkdir -p out
 
-if [ -n "$CHALLONGE_API_KEY" ] && [ -n "$SHEET" ]; then
-  ncbl challonge --config "$CONFIG" --from-sheet "$SHEET" --api-key "$CHALLONGE_API_KEY" --cache challonge_cache || echo "(challonge skipped)"
+# 1) fetch + cache Challonge brackets from your links (skips if no key and already cached)
+if [ -s "$LINKS" ] && [ -n "$CHALLONGE_API_KEY" ]; then
+  ncbl challonge --config "$CONFIG" --links "$LINKS" --api-key "$CHALLONGE_API_KEY" --cache challonge_cache --outdir out || echo "(challonge fetch skipped)"
 fi
 
-# Ranking side — your Top-10 grind (reads the sheet from config: true event count)
+# 2) Ranking side — your Top-10 grind (reads the sheet from config: true event count)
 ncbl standings --config "$CONFIG" > out/standings.txt || true
 ncbl predict   --config "$CONFIG" || true
 ncbl report    --config "$CONFIG" --h2h-cache challonge_cache --outdir out/lifetime 2>/dev/null \\
   || ncbl report --config "$CONFIG" --outdir out/lifetime || echo "(ranking report skipped)"
 
-# Coaching side — confidence reflects true events attended
-ncbl coach --config "$CONFIG" --outdir out/lifetime
-ncbl coach --config "$CONFIG" --season "$SEASON" --outdir out/season
+# 3) Coaching side — confidence + rivals reflect the sheet AND Challonge (report-less tournaments)
+ncbl coach --config "$CONFIG" --links "$LINKS" --h2h-cache challonge_cache --api-key "$CHALLONGE_API_KEY" --outdir out/lifetime
+ncbl coach --config "$CONFIG" --links "$LINKS" --h2h-cache challonge_cache --api-key "$CHALLONGE_API_KEY" --season "$SEASON" --outdir out/season
 echo "Done -> out/lifetime, out/season, out/standings.txt"
 """
 
@@ -407,18 +426,17 @@ REM FULL run: Top-10 grind (ranking) + coaching + Challonge head-to-head. Double
 cd /d "%~dp0"
 set "CONFIG=ncbl.config.json"
 set "SEASON=2026 Season 6"
-REM ---- optional: Challonge head-to-head ----
+set "LINKS=challonge_links.txt"
+REM free key: challonge.com -> Developer API (needed once to fetch; then cached)
 set "CHALLONGE_API_KEY="
-set "SHEET="
-REM ------------------------------------------
 if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat
 if not exist out mkdir out
-if not "%CHALLONGE_API_KEY%"=="" if not "%SHEET%"=="" ncbl challonge --config %CONFIG% --from-sheet "%SHEET%" --api-key "%CHALLONGE_API_KEY%" --cache challonge_cache
+if not "%CHALLONGE_API_KEY%"=="" ncbl challonge --config %CONFIG% --links "%LINKS%" --api-key "%CHALLONGE_API_KEY%" --cache challonge_cache --outdir out
 ncbl standings --config %CONFIG% > out\\standings.txt
 ncbl predict   --config %CONFIG%
 ncbl report    --config %CONFIG% --h2h-cache challonge_cache --outdir out\\lifetime
-ncbl coach     --config %CONFIG% --outdir out\\lifetime
-ncbl coach     --config %CONFIG% --season "%SEASON%" --outdir out\\season
+ncbl coach     --config %CONFIG% --links "%LINKS%" --h2h-cache challonge_cache --api-key "%CHALLONGE_API_KEY%" --outdir out\\lifetime
+ncbl coach     --config %CONFIG% --links "%LINKS%" --h2h-cache challonge_cache --api-key "%CHALLONGE_API_KEY%" --season "%SEASON%" --outdir out\\season
 echo Done -^> out\\lifetime, out\\season, out\\standings.txt
 pause
 """
@@ -465,8 +483,31 @@ def cmd_coach(args):
             events_attended = league.n_events(_pkey(league, player))
         except (SystemExit, Exception) as ex:
             print("(event count from sheet skipped:", ex, ")")
-    res = CO.coach(reports, player, scope=scope, meta_report=meta_report,
-                   community=community, events_attended=events_attended)
+
+    # Challonge head-to-head from a links file / cache: fills rivals for tournaments with no
+    # report, and counts them toward events attended. No decks (Challonge has no combos).
+    h2h_extra = None
+    slugs = CH.slugs_from_file(args.links) if getattr(args, "links", None) else []
+    cache_dir = getattr(args, "h2h_cache", None) or "challonge_cache"
+    api_key = getattr(args, "api_key", None) or os.environ.get("CHALLONGE_API_KEY")
+    tournaments = []
+    for s in slugs:
+        try:
+            tournaments.append(CH.parse_tournament(CH.fetch(s, api_key=api_key, cache_dir=cache_dir)))
+        except Exception as ex:
+            print(f"(challonge {s} skipped: {ex})")
+    if not slugs and getattr(args, "h2h_cache", None):
+        tournaments = CH.load_cache(cache_dir, season=args.season, seasons_cfg=cfg.get("seasons"))
+    if tournaments:
+        report_events = {re.sub(r"\s+", "", str(r.get("event", "")).lower()) for r in reports}
+        extra = [t for t in tournaments if re.sub(r"\s+", "", str(t["name"]).lower()) not in report_events]
+        h2h_extra = CH.head_to_head(extra, player)
+        all_events = report_events | {re.sub(r"\s+", "", str(t["name"]).lower()) for t in tournaments}
+        events_attended = max(events_attended or 0, len(all_events))
+        print(f"[challonge: {len(tournaments)} bracket(s), {len(extra)} without a report -> merged into rivals]")
+
+    res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community,
+                   events_attended=events_attended, h2h_extra=h2h_extra)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
     img = base + "_matchups.png"
@@ -485,10 +526,12 @@ def cmd_coach(args):
 def cmd_challonge(args):
     cfg = load_config(args.config)
     slugs = list(args.slugs or [])
+    if getattr(args, "links", None):
+        slugs += [s for s in CH.slugs_from_file(args.links) if s not in slugs]
     if args.from_sheet:
         slugs += [s for s in CH.slugs_from_sheet(args.from_sheet, cfg) if s not in slugs]
     if not slugs:
-        raise SystemExit("error: give --slugs ncbl-goonday ... or --from-sheet sheet.xlsx to harvest links.")
+        raise SystemExit("error: give --slugs ncbl-goonday ..., --links links.txt, or --from-sheet sheet.xlsx.")
     api_key = args.api_key or os.environ.get("CHALLONGE_API_KEY")
     seasons = cfg.get("seasons") or {}
     tournaments, missed = [], []
@@ -657,12 +700,19 @@ def main(argv=None):
     p.add_argument("--input", metavar="PATH",
                    help="league sheet (.xlsx/.csv/folder/URL) -> confidence reflects true events attended "
                         "(default: config 'ranking_sheet_url')")
+    p.add_argument("--links", metavar="FILE",
+                   help="txt/md/json file of Challonge links (one per tournament) -> merges head-to-head, "
+                        "even for tournaments with no report")
+    p.add_argument("--h2h-cache", dest="h2h_cache", metavar="DIR",
+                   help="Challonge cache dir (offline reuse of fetched brackets)")
+    p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")
     p.add_argument("--bd", metavar="PATH", help=argparse.SUPPRESS)   # hidden: full-community prediction pool
     p.set_defaults(func=cmd_coach)
 
     p = sub.add_parser("challonge", help="head-to-head records from Challonge brackets (needs a free API key)")
     p.add_argument("--player", required=True, help="player to build head-to-head for")
     p.add_argument("--slugs", nargs="+", metavar="ID", help="Challonge tournament ids, e.g. ncbl-goonday")
+    p.add_argument("--links", metavar="FILE", help="txt/md/json file of Challonge links (one per tournament)")
     p.add_argument("--from-sheet", dest="from_sheet", metavar="PATH", help="harvest Challonge links from a Data-Entry sheet")
     p.add_argument("--api-key", dest="api_key", metavar="KEY", help="Challonge API key (or set CHALLONGE_API_KEY)")
     p.add_argument("--cache", default="challonge_cache", metavar="DIR", help="JSON cache dir (enables offline reruns)")

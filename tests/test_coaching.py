@@ -47,7 +47,17 @@ def test_confidence_scales_with_reports():
     assert two["unlocked"]["cross_event_trends"] is True   # >=2 events unlocks trends
 
 
-def test_confidence_uses_events_attended_from_sheet():
+def test_h2h_extra_merges_and_adds_challonge_rivals():
+    reps = _reports()   # espiiii, report-derived rivals (none, since _reports has no matches)
+    # Challonge fills a report-less tournament: beat Newbie 1-0, and adds a loss vs an existing foe
+    h2h = [{"opponent": "Newbie", "wins": 1, "losses": 0},
+           {"opponent": "Bongo", "wins": 0, "losses": 2}]
+    res = C.coach(reps, "espiiii", events_attended=7, h2h_extra=h2h)
+    riv = {r["player"]: r for r in res["rivals"]}
+    assert riv["Newbie"]["wins"] == 1 and riv["Newbie"]["source"] == "challonge"
+    assert riv["Bongo"]["losses"] == 2
+    txt = C.coach_txt(res)
+    assert "challonge only" in txt.lower()
     agg = C.aggregate(_reports(), "espiiii")               # 2 reports
     c = C.confidence(agg, events_attended=7)               # but 7 attended per the sheet
     assert c["events"] == 7 and c["report_events"] == 2 and c["missing_reports"] == 5

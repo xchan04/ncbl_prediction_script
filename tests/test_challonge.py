@@ -9,6 +9,21 @@ def test_slug_from_url():
     assert CH.slug_from_url("https://challonge.com/abcd1234") == "abcd1234"
 
 
+def test_slugs_from_file_txt_md_json(tmp_path):
+    txt = tmp_path / "links.txt"
+    txt.write_text("# my brackets\nhttps://ncbl.challonge.com/goonday\n\nncbl.challonge.com/rfv/standings\nabcd1234\n")
+    assert CH.slugs_from_file(str(txt)) == ["ncbl-goonday", "ncbl-rfv", "abcd1234"]
+
+    md = tmp_path / "links.md"
+    md.write_text("- Event 1: [bracket](https://ncbl.challonge.com/goonday)\n- Event 2: https://challonge.com/xy12\n")
+    assert CH.slugs_from_file(str(md)) == ["ncbl-goonday", "xy12"]
+
+    js = tmp_path / "links.json"
+    js.write_text('{"links": ["https://ncbl.challonge.com/goonday", "wxyz9"]}')
+    assert CH.slugs_from_file(str(js)) == ["ncbl-goonday", "wxyz9"]
+
+
+
 def _mock():
     # Challonge API v1 shape
     return {"tournament": {"name": "GoonDay",

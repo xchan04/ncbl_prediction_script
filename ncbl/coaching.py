@@ -389,7 +389,8 @@ def _conf(n, hi, mid):
 
 
 # ---------------- analysis ----------------
-def coach(reports, player, scope="lifetime", meta_report=None, community=None, events_attended=None):
+def coach(reports, player, scope="lifetime", meta_report=None, community=None,
+          events_attended=None, h2h_extra=None):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
@@ -401,7 +402,23 @@ def coach(reports, player, scope="lifetime", meta_report=None, community=None, e
     rivals = []
     for opp, (w, l) in agg["opp_players"].items():
         rivals.append({"player": opp, "wins": w, "losses": l, "played": w + l,
-                       "win_pct": round(100 * w / max(1, w + l), 1)})
+                       "win_pct": round(100 * w / max(1, w + l), 1), "source": "reports"})
+    # merge Challonge head-to-head from tournaments that have NO report (fills the gaps)
+    if h2h_extra:
+        by_name = {r["player"].lower(): r for r in rivals}
+        for h in h2h_extra:
+            key = str(h["opponent"]).lower()
+            if key in by_name:
+                r = by_name[key]
+                r["wins"] += h.get("wins", 0)
+                r["losses"] += h.get("losses", 0)
+                r["played"] = r["wins"] + r["losses"]
+                r["win_pct"] = round(100 * r["wins"] / max(1, r["played"]), 1)
+                r["source"] = "reports+challonge"
+            else:
+                w2, l2 = h.get("wins", 0), h.get("losses", 0)
+                rivals.append({"player": h["opponent"], "wins": w2, "losses": l2, "played": w2 + l2,
+                               "win_pct": round(100 * w2 / max(1, w2 + l2), 1), "source": "challonge"})
     rivals.sort(key=lambda r: (r["wins"] - r["losses"], -r["played"]))
 
     # combo strengths / liabilities
@@ -756,6 +773,10 @@ def coach_txt(d):
     L.append(f"\nRIVALS — your head-to-head ({d.get('scope','lifetime')})")
     for r in d.get("rivals", []):
         tag = "  <-- nemesis" if r["losses"] > r["wins"] and r["played"] >= 2 else ""
+        if r.get("source") == "challonge":
+            tag += "  [challonge only]"
+        elif r.get("source") == "reports+challonge":
+            tag += "  [+challonge]"
         L.append(f"  {r['player']:20} {r['wins']}-{r['losses']}  ({r['win_pct']}%, {r['played']} sets){tag}")
     if not d.get("rivals"):
         L.append("  (no match-recap data in these reports)")
@@ -876,8 +897,9 @@ def coach_html(d, cfg, image_path=None):
     recommendation = f'<h2>Recommended next-tournament deck</h2>{deck_rows}{rec_extra}'
 
     # rivals (head-to-head vs players), nemeses highlighted
+    _src = {"challonge": " · challonge", "reports+challonge": " · +challonge"}
     rival_rows = "".join(
-        f'<tr><td>{e(r["player"])}</td>'
+        f'<tr><td>{e(r["player"])}<span style="color:{muted};font-size:11px">{_src.get(r.get("source"), "")}</span></td>'
         f'<td style="text-align:right;color:{green if r["wins"]>=r["losses"] else red}">{r["wins"]}-{r["losses"]}</td>'
         f'<td style="text-align:right">{r["win_pct"]}%</td>'
         f'<td style="text-align:right;color:{muted}">{r["played"]}</td></tr>'

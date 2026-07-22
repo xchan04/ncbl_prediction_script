@@ -49,6 +49,43 @@ def slugs_from_sheet(path, cfg):
     return slugs
 
 
+def slugs_from_file(path):
+    """Read Challonge links/slugs from a manual list file — one per tournament.
+
+    Accepts .txt / .md (one URL or slug per line, or URLs embedded in markdown; '#' lines
+    are comments) or .json (a list, or {"links": [...]} / {"slugs": [...]}). Returns unique
+    slugs in order. This is the fallback when links can't be harvested from reports/sheet."""
+    slugs = []
+
+    def add(tok):
+        tok = str(tok).strip().strip("<>()[]")
+        if not tok:
+            return
+        s = slug_from_url(tok) or tok
+        if s and s not in slugs:
+            slugs.append(s)
+
+    with open(path, encoding="utf-8") as fh:
+        raw = fh.read()
+    if os.path.splitext(path)[1].lower() == ".json":
+        data = json.loads(raw)
+        items = data if isinstance(data, list) else (data.get("links") or data.get("slugs") or [])
+        for it in items:
+            add(it)
+    else:
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            urls = re.findall(r"(?:https?://)?[\w-]*\.?challonge\.com/[A-Za-z0-9_]+", line)
+            if urls:
+                for u in urls:
+                    add(u)
+            else:
+                add(line.split()[0])   # a bare slug per line
+    return slugs
+
+
 # ---------------- fetch (cache-first) ----------------
 def fetch(slug, api_key=None, cache_dir="challonge_cache", timeout=20):
     """Return the raw tournament JSON dict. Uses the on-disk cache if present;

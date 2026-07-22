@@ -20,8 +20,32 @@ import re
 from collections import Counter, defaultdict
 
 MIN_SCOUT_MATCHES = 2      # face someone this many times before predicting their deck
-LOCKED_AT = 80
-UNPREDICTABLE_UNDER = 25
+UNPREDICTABLE_UNDER = 25   # below this predictability we show "??? ??? ???"
+
+
+# Predictability gradient: neon green (certain) -> yellow (retains core) -> red (chaotic).
+# The score blends full-combo repeat with blade repeat, so "keeps blades, swaps ratchets/bits"
+# lands in the middle rather than looking random.
+_PRED_TIERS = [
+    (100, "Complete Certainty", "#39ff14"),   # neon green — never changes the deck
+    (86, "Very Predictable", "#7CFC00"),
+    (72, "Predictable", "#B4E400"),
+    (58, "Somewhat Predictable", "#E4E400"),   # yellow-green
+    (46, "Retains Core", "#FFD400"),           # yellow — 1-2 locked, rest flexes
+    (32, "Somewhat Adapts", "#FFA500"),
+    (18, "Very Adaptable", "#FF6B1A"),
+    (0, "Unpredictable", "#FF3B3B"),           # red — explores, no read
+]
+
+
+def _pred_tier(pct):
+    if pct is None:
+        return ("Known deck", "#39ff14")
+    for lo, label, color in _PRED_TIERS:
+        if pct >= lo:
+            return (label, color)
+    return ("Unpredictable", "#FF3B3B")
+
 
 
 def _parts(combo):
@@ -106,7 +130,35 @@ def _predict_deck(match_lists):
     return picks
 
 
-def opponent_scout(reports, player, agg, community=None, min_matches=MIN_SCOUT_MATCHES):
+def _meta_style(combos, meta):
+    """Tag an opponent 'meta' / 'anti-meta' / 'mixed' by how much their kit sits in the field meta."""
+    if not meta or not combos:
+        return None
+    top_combos = {c["combo"] for c in (meta.get("top3_combos") or [])}
+    top_blades = {b["blade"] for b in (meta.get("blade_meta") or [])[:6]}
+    combos = set(combos)
+    hits = sum(1 for c in combos if c in top_combos or _blade(c) in top_blades)
+    frac = hits / len(combos)
+    tag = "meta" if frac >= 0.6 else "anti-meta" if frac <= 0.34 else "mixed"
+    return {"tag": tag, "pct": round(100 * frac)}
+
+
+def _watch(pred, pred_label, meta_style):
+    notes = []
+    if pred is None:
+        notes.append("their actual deck is known (community data)")
+    elif pred >= 72:
+        notes.append("highly readable — prep a specific counter before you play them")
+    elif pred < UNPREDICTABLE_UNDER:
+        notes.append("hard to prep — expect anything; play reactively")
+    if meta_style and meta_style["tag"] == "meta" and (pred is None or pred >= 58):
+        notes.append("meta player: a meta shift may change this deck — re-scout them if the meta moves")
+    elif meta_style and meta_style["tag"] == "anti-meta":
+        notes.append("anti-meta: runs off-meta builds, less swayed by the field")
+    return notes
+
+
+def opponent_scout(reports, player, agg, community=None, meta=None, min_matches=MIN_SCOUT_MATCHES):
     decks = _opp_decks(reports, player)
     comm = _community_decks(community, player) if community else {}
     rivals = dict(agg.get("opp_players", {}))
@@ -116,10 +168,12 @@ def opponent_scout(reports, player, agg, community=None, min_matches=MIN_SCOUT_M
         n = len(match_lists)
         if n < min_matches:
             continue
-        jac = _avg_jaccard([set(c) for c in match_lists])
-        j = jac or 0
-        label = "locked" if j >= LOCKED_AT else "unpredictable" if j < UNPREDICTABLE_UNDER else "core+flex"
-        readout = None if label == "unpredictable" else _predict_deck(match_lists)
+        combo_jac = _avg_jaccard([set(c) for c in match_lists]) or 0
+        blade_jac = _avg_jaccard([{_blade(c) for c in cl} for cl in match_lists]) or 0
+        pred = round(0.6 * combo_jac + 0.4 * blade_jac)      # blended predictability
+        readout = None if pred < UNPREDICTABLE_UNDER else _predict_deck(match_lists)
+        all_combos = {c for cl in match_lists for c in cl}
+        mstyle = _meta_style(all_combos, meta)
 
         # your best in-deck answer to the combos they keep bringing
         combo_present = Counter(c for combos in match_lists for c in set(combos))
@@ -140,14 +194,18 @@ def opponent_scout(reports, player, agg, community=None, min_matches=MIN_SCOUT_M
             tot = sum(comm_deck.values()) or 1
             readout = [{"kind": "combo", "blade": _blade(c), "combo": c,
                         "blade_pct": round(100 * k / tot)} for c, k in comm_deck.most_common(6)]
-            label = "known deck (community)"
+            pred = None                                       # not a guess anymore — it's known
+            mstyle = _meta_style(set(comm_deck), meta) or mstyle
 
+        pred_label, pred_color = _pred_tier(pred)
         w, l = rivals.get(opp, (0, 0))
         out.append({"opponent": opp, "matches": n, "record": f"{w}-{l}",
-                    "predictability": jac, "consistency": label, "source": source,
-                    "readout": readout, "answers": answers,
+                    "predictability": pred, "pred_label": pred_label, "pred_color": pred_color,
+                    "meta_style": mstyle, "watch": _watch(pred, pred_label, mstyle),
+                    "source": source, "readout": readout, "answers": answers,
                     "decks_faced": [list(c) for c in match_lists]})
     return out
+
 
 
 # ---------------- self scout (how you're read) ----------------
@@ -197,7 +255,7 @@ def meta_counter(agg, meta, top_combos=8):
 
 
 def build(reports, player, agg, meta=None, community=None):
-    return {"scouting": opponent_scout(reports, player, agg, community=community),
+    return {"scouting": opponent_scout(reports, player, agg, community=community, meta=meta),
             "self_read": self_read(agg),
             "meta_counter": meta_counter(agg, meta),
             "backdoor": bool(community)}
@@ -219,9 +277,11 @@ def to_txt(p):
     sc = p.get("scouting") or []
     L.append("\nRIVAL SCOUTING — shuffle prediction" + ("  [community mode]" if p.get("backdoor") else ""))
     for s in sc:
-        pr = f"{s['predictability']}%" if s["predictability"] is not None else "n/a"
-        L.append(f"  {s['opponent']} — you {s['record']} / {s['matches']} matches · predictability {pr} ({s['consistency']})")
-        if s["consistency"] == "unpredictable" or not s["readout"]:
+        pr = f"{s['predictability']}%" if s["predictability"] is not None else "known"
+        mtag = f" · {s['meta_style']['tag']} ({s['meta_style']['pct']}%)" if s.get("meta_style") else ""
+        L.append(f"  {s['opponent']} — you {s['record']} / {s['matches']} matches · "
+                 f"[{s['pred_label']} {pr}]{mtag}")
+        if not s["readout"]:
             L.append("     ??? ??? ???")
             for i, deck in enumerate(s["decks_faced"], 1):
                 L.append(f"       deck {i}: {' · '.join(deck)}")
@@ -229,6 +289,8 @@ def to_txt(p):
             L.append("     " + "  ·  ".join(_pick_txt(pk) for pk in s["readout"]))
         for a in s["answers"]:
             L.append(f"     answer: bring {a['bring']} vs {a['vs']} (you {a['record']})")
+        for wnote in s.get("watch", []):
+            L.append(f"     watch: {wnote}")
         if s["source"] != "your matches":
             L.append(f"     [source: {s['source']}]")
     if not sc:
@@ -271,28 +333,34 @@ def to_html(p, theme):
     e = _h.escape
     orange = theme.get("player", "#ff8c1a")
     green, red, muted, border = "#57e26b", theme.get("cutoff", "#ff5555"), theme.get("muted", "#6b7280"), "#241a0e"
-    cons_col = {"locked": red, "core+flex": orange, "unpredictable": muted, "known deck (community)": red}
 
     sc = p.get("scouting") or []
     bd = ' <span class="tag">community mode</span>' if p.get("backdoor") else ""
     cards = ""
     for s in sc:
-        pr = f"{s['predictability']}%" if s["predictability"] is not None else "n/a"
-        head = (f'<b>{e(s["opponent"])}</b> <span class="sub">— you {e(s["record"])} / {s["matches"]} matches · '
-                f'predictability {pr} · <b style="color:{cons_col.get(s["consistency"], muted)}">{e(s["consistency"])}</b></span>')
+        pr = f"{s['predictability']}%" if s["predictability"] is not None else "known"
+        box = (f'<span style="background:{s["pred_color"]};color:#0a0a0a;border-radius:6px;'
+               f'padding:2px 9px;font-weight:700;font-size:12px">{e(s["pred_label"])} · {pr}</span>')
+        mtag = ""
+        if s.get("meta_style"):
+            mc = {"meta": orange, "anti-meta": green, "mixed": muted}.get(s["meta_style"]["tag"], muted)
+            mtag = f' <span class="tag" style="border-color:{mc};color:{mc}">{e(s["meta_style"]["tag"])} {s["meta_style"]["pct"]}%</span>'
+        head = (f'<b>{e(s["opponent"])}</b> {box}{mtag} '
+                f'<span class="sub">— you {e(s["record"])} / {s["matches"]} matches</span>')
         decks_popup = ("<details><summary>decks faced</summary>"
                        + "".join(f'<div class="sub">deck {i}: {e(" · ".join(dk))}</div>'
                                  for i, dk in enumerate(s["decks_faced"], 1)) + "</details>")
-        if s["consistency"] == "unpredictable" or not s["readout"]:
-            body = (f'<div style="margin:6px 0;font-size:18px;letter-spacing:2px;color:{muted}">??? ??? ???</div>'
+        if not s["readout"]:
+            body = (f'<div style="margin:6px 0;font-size:18px;letter-spacing:2px;color:{red}">??? ??? ???</div>'
                     f'{decks_popup}')
         else:
             body = ('<div style="margin:6px 0">' + " ".join(_pick_html(pk, e, muted, red) for pk in s["readout"])
                     + "</div>" + decks_popup)
         answers = "".join(f'<div class="sub">Answer: bring <b>{e(a["bring"])}</b> vs {e(a["vs"])} (you {e(a["record"])})</div>'
                           for a in s["answers"])
+        watch = "".join(f'<div class="nudge">▲ {e(w)}</div>' for w in s.get("watch", []))
         src = f'<div class="sub" style="color:{muted}">source: {e(s["source"])}</div>' if s["source"] != "your matches" else ""
-        cards += f'<div class="card">{head}{body}{answers}{src}</div>'
+        cards += f'<div class="card">{head}{body}{answers}{watch}{src}</div>'
     scouting_html = f'<h2>Rival scouting — shuffle prediction{bd}</h2>' + (cards or '<div class="sub">No opponent faced 2+ times yet.</div>')
 
     sr = p.get("self_read") or {}

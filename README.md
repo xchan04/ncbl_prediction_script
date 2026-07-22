@@ -68,6 +68,7 @@ Creates `espiiii_ncbl/` with `reports/`, `meta/`, `out/`, a prefilled **ncbl.con
 | `run_lifetime.sh` / `.bat` | lifetime coaching report → `out/lifetime` |
 | `run_season.sh` / `.bat` | one-season coaching report → `out/season` (edit the `SEASON` line) |
 | `run_all.sh` / `.bat` | lifetime + season + ranking report + standings |
+| `run_full.sh` / `.bat` | everything above **+ Challonge head-to-head** (edit in your API key + link) — the Top-10 grind and coaching in one shot |
 
 So a player can either **edit the scripts** (they have plain variables up top) and double-click, or
 run the commands by hand. Because everything reads `ncbl.config.json`, the manual commands are short —
@@ -208,6 +209,10 @@ gets **more comprehensive the more you feed it** — an explicit incentive to co
   no external part database.
 - Sample sizes accumulate across reports, so findings graduate *tentative → likely →
   confirmed*, and a **confidence tier** (Bronze/Silver/Gold) gates the deeper sections.
+- Pass `--input <sheet>` (or set `ranking_sheet_url` in config) and the tier reflects your
+  **true events attended** from the sheet — not just the reports on hand. If you've played 7
+  tournaments but only 5 published reports, it shows "7 events (5 with reports)" and notes that
+  2 events lack combat detail. Combat sections (combos/matchups/finishes) still key off the reports.
 - With ≥2 events, **cross-event signal** unlocks (per-combo trends, a widened meta).
 - **Degrades gracefully**: works from a single report, tolerates missing/garbled sections
   (each PDF section parses independently), and older/letter-spaced report layouts

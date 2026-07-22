@@ -365,16 +365,23 @@ def field_benchmark(reports, player, agg):
 
 
 # ---------------- confidence ----------------
-def confidence(agg):
-    e, b = agg["n_events"], agg["total_battles"]
+def confidence(agg, events_attended=None):
+    """Confidence tier. Event count is the true events ATTENDED (from the league sheet)
+    when available, else the number of reports on hand. Combat-detail sections still key
+    off report coverage, so we track both."""
+    report_events = agg["n_events"]
+    e = max(events_attended or 0, report_events)
+    b = agg["total_battles"]
     if e >= 4 or b >= 150:
         tier = "Gold"
     elif e >= 2 or b >= 60:
         tier = "Silver"
     else:
         tier = "Bronze"
-    unlocked = {"cross_event_trends": e >= 2, "widened_meta": e >= 2}
-    return {"tier": tier, "events": e, "battles": b, "unlocked": unlocked}
+    unlocked = {"cross_event_trends": report_events >= 2, "widened_meta": report_events >= 2}
+    return {"tier": tier, "events": e, "report_events": report_events, "battles": b,
+            "attended": events_attended, "missing_reports": max(0, e - report_events),
+            "unlocked": unlocked}
 
 
 def _conf(n, hi, mid):
@@ -382,12 +389,12 @@ def _conf(n, hi, mid):
 
 
 # ---------------- analysis ----------------
-def coach(reports, player, scope="lifetime", meta_report=None, community=None):
+def coach(reports, player, scope="lifetime", meta_report=None, community=None, events_attended=None):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
     comm = community_benchmark(reports)
-    conf = confidence(agg)
+    conf = confidence(agg, events_attended=events_attended)
     weaknesses, strengths, swaps, meta_notes = [], [], [], []
 
     # rivals: your head-to-head vs each opponent PLAYER (from match recaps), nemeses first
@@ -659,6 +666,20 @@ def recommend(agg, meta, deck_size=3, top_meta=6):
 
 
 # ---------------- rendering ----------------
+def _events_str(c):
+    if c.get("missing_reports"):
+        return f"{c['events']} events ({c['report_events']} with reports)"
+    return f"{c['events']} event(s)"
+
+
+def _coverage_note(c):
+    if c.get("missing_reports"):
+        n = c["missing_reports"]
+        return (f"{n} attended event(s) have no NCBLAST report — combat detail (combos, matchups, "
+                f"finishes) covers {c['report_events']} of {c['events']}. Add those reports to sharpen it.")
+    return f"feed more reports: {_next_tier(c).replace('**','')}"
+
+
 def _next_tier(conf):
     if conf["tier"] == "Bronze":
         return "reach 2 events (or 60 battles) for **Silver** — unlocks cross-event trends"
@@ -670,9 +691,9 @@ def _next_tier(conf):
 def coach_txt(d):
     c = d["confidence"]
     L = [f"{d['player']} — coaching report  [scope: {d.get('scope','lifetime')}]",
-         f"{d['n_events']} event(s) · {c['battles']} battles · confidence: {c['tier']}",
+         f"{_events_str(c)} · {c['battles']} battles · confidence: {c['tier']}",
          f"archetype: {d.get('archetype')}  style: {d.get('style')}",
-         f"(feed more reports: {_next_tier(c).replace('**','')})", ""]
+         f"({_coverage_note(c)})", ""]
     g = d.get("goal") or {}
     if g:
         form = f"form: {g.get('win_pct')}% win, {g.get('ppb'):+} PPB over {g.get('battles')} btl"
@@ -927,10 +948,10 @@ def coach_html(d, cfg, image_path=None):
  summary{{color:{orange};cursor:pointer;font-size:12px;margin-top:6px}} details{{margin-top:4px}}
 </style></head><body><div class="wrap">
  <h1>{e(d['player'])} <span class="pill">{e(scope)}</span></h1>
- <div class="card"><span class="big">{d['n_events']} event(s) · {c['battles']} battles · confidence
+ <div class="card"><span class="big">{_events_str(c)} · {c['battles']} battles · confidence
    <b style="color:{orange}">{c['tier']}</b></span><br>
    <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
-   <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
+   <div class="nudge">▲ {e(_coverage_note(c))}</div></div>
  {goal_html}
  {recommendation}
  {strengths}{weaknesses}{swaps}

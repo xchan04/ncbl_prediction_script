@@ -198,7 +198,7 @@ def cmd_setup(args):
     print("  meta/              ← drop the field Meta Analysis .json here")
     print("  out/               ← reports are written here")
     print("  RUN.md             ← copy-paste commands")
-    print("  install + run_lifetime + run_season + run_all  (.sh for mac/linux, .bat for Windows)")
+    print("  install + run_lifetime + run_season + run_all + run_full  (.sh mac/linux, .bat Windows)")
     if not args.ranking_sheet_url:
         print("\nNext: paste your Google Sheet link into ncbl.config.json (ranking_sheet_url),")
         print("      shared 'Anyone with the link -> Viewer'.")
@@ -218,6 +218,7 @@ def _write_runners(root, pipeline_dir, force=False):
                                          coach='ncbl coach --config "$CONFIG" --season "$SEASON" --outdir "$OUT"',
                                          out="out/season"), True),
         "run_all.sh": (_SH_ALL, True),
+        "run_full.sh": (_SH_FULL, True),
         "install.bat": (_BAT_INSTALL.format(pipeline=pipeline_dir), False),
         "run_lifetime.bat": (_BAT_RUN.format(title="LIFETIME coaching report", season_set="",
                                              coach="ncbl coach --config %CONFIG% --outdir %OUT%",
@@ -226,6 +227,7 @@ def _write_runners(root, pipeline_dir, force=False):
                                            coach='ncbl coach --config %CONFIG% --season "%SEASON%" --outdir %OUT%',
                                            out="out\\season"), False),
         "run_all.bat": (_BAT_ALL, False),
+        "run_full.bat": (_BAT_FULL, False),
     }
     for name, (content, executable) in files.items():
         path = os.path.join(root, name)
@@ -322,6 +324,37 @@ ncbl standings --config "$CONFIG" > out/standings.txt 2>/dev/null || true
 echo "Done -> out/lifetime, out/season"
 """
 
+_SH_FULL = """\
+#!/usr/bin/env bash
+# FULL run: Top-10 grind (ranking) + coaching + Challonge head-to-head. Run: ./run_full.sh
+# Coaching confidence uses the sheet's TRUE event count (even events with no report).
+set -e
+cd "$(dirname "$0")"
+CONFIG="ncbl.config.json"
+SEASON="2026 Season 6"
+# ---- optional: Challonge head-to-head (fills matches for tournaments with no report) ----
+CHALLONGE_API_KEY=""     # free key: challonge.com -> Developer API
+SHEET=""                 # sheet URL/path that contains the Challonge bracket links
+# -----------------------------------------------------------------------------------------
+[ -d .venv ] && . .venv/bin/activate
+mkdir -p out
+
+if [ -n "$CHALLONGE_API_KEY" ] && [ -n "$SHEET" ]; then
+  ncbl challonge --config "$CONFIG" --from-sheet "$SHEET" --api-key "$CHALLONGE_API_KEY" --cache challonge_cache || echo "(challonge skipped)"
+fi
+
+# Ranking side — your Top-10 grind (reads the sheet from config: true event count)
+ncbl standings --config "$CONFIG" > out/standings.txt || true
+ncbl predict   --config "$CONFIG" || true
+ncbl report    --config "$CONFIG" --h2h-cache challonge_cache --outdir out/lifetime 2>/dev/null \\
+  || ncbl report --config "$CONFIG" --outdir out/lifetime || echo "(ranking report skipped)"
+
+# Coaching side — confidence reflects true events attended
+ncbl coach --config "$CONFIG" --outdir out/lifetime
+ncbl coach --config "$CONFIG" --season "$SEASON" --outdir out/season
+echo "Done -> out/lifetime, out/season, out/standings.txt"
+"""
+
 _BAT_INSTALL = """\
 @echo off
 REM One-time install. Double-click or run: install.bat
@@ -368,6 +401,28 @@ echo Done -^> out\\lifetime, out\\season
 pause
 """
 
+_BAT_FULL = """\
+@echo off
+REM FULL run: Top-10 grind (ranking) + coaching + Challonge head-to-head. Double-click or run: run_full.bat
+cd /d "%~dp0"
+set "CONFIG=ncbl.config.json"
+set "SEASON=2026 Season 6"
+REM ---- optional: Challonge head-to-head ----
+set "CHALLONGE_API_KEY="
+set "SHEET="
+REM ------------------------------------------
+if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat
+if not exist out mkdir out
+if not "%CHALLONGE_API_KEY%"=="" if not "%SHEET%"=="" ncbl challonge --config %CONFIG% --from-sheet "%SHEET%" --api-key "%CHALLONGE_API_KEY%" --cache challonge_cache
+ncbl standings --config %CONFIG% > out\\standings.txt
+ncbl predict   --config %CONFIG%
+ncbl report    --config %CONFIG% --h2h-cache challonge_cache --outdir out\\lifetime
+ncbl coach     --config %CONFIG% --outdir out\\lifetime
+ncbl coach     --config %CONFIG% --season "%SEASON%" --outdir out\\season
+echo Done -^> out\\lifetime, out\\season, out\\standings.txt
+pause
+"""
+
 
 
 def cmd_coach(args):
@@ -400,7 +455,18 @@ def cmd_coach(args):
     community = None
     if getattr(args, "bd", None):
         community = CO.load_reports(args.bd)
-    res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community)
+    # true events attended (from the league sheet) drives the confidence tier, even for
+    # tournaments that never published a report.
+    events_attended = None
+    sheet = getattr(args, "input", None) or cfg.get("ranking_sheet_url")
+    if sheet and str(sheet) != "PASTE_YOUR_GOOGLE_SHEET_LINK_HERE":
+        try:
+            league = League(cfg).load(sheet)
+            events_attended = league.n_events(_pkey(league, player))
+        except (SystemExit, Exception) as ex:
+            print("(event count from sheet skipped:", ex, ")")
+    res = CO.coach(reports, player, scope=scope, meta_report=meta_report,
+                   community=community, events_attended=events_attended)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
     img = base + "_matchups.png"
@@ -588,6 +654,9 @@ def main(argv=None):
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
     p.add_argument("--season", metavar="NAME", help="scope to a season window (default: lifetime = all reports)")
     p.add_argument("--meta", metavar="FILE", help="optional field meta-analysis JSON -> meta-counter picks")
+    p.add_argument("--input", metavar="PATH",
+                   help="league sheet (.xlsx/.csv/folder/URL) -> confidence reflects true events attended "
+                        "(default: config 'ranking_sheet_url')")
     p.add_argument("--bd", metavar="PATH", help=argparse.SUPPRESS)   # hidden: full-community prediction pool
     p.set_defaults(func=cmd_coach)
 

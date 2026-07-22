@@ -47,6 +47,17 @@ def test_confidence_scales_with_reports():
     assert two["unlocked"]["cross_event_trends"] is True   # >=2 events unlocks trends
 
 
+def test_confidence_uses_events_attended_from_sheet():
+    agg = C.aggregate(_reports(), "espiiii")               # 2 reports
+    c = C.confidence(agg, events_attended=7)               # but 7 attended per the sheet
+    assert c["events"] == 7 and c["report_events"] == 2 and c["missing_reports"] == 5
+    assert c["tier"] == "Gold"                             # 7 events -> Gold regardless of report count
+    res = C.coach(_reports(), "espiiii", events_attended=7)
+    txt = C.coach_txt(res)
+    assert "7 events (2 with reports)" in txt
+    assert "no NCBLAST report" in txt                      # coverage note fires
+
+
 def test_bad_combo_flagged_as_weakness():
     res = C.coach(_reports(), "espiiii")
     assert any("Shark 7-70 Low Rush" in w["text"] for w in res["weaknesses"])

@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: ncbl-prediction
+Version: 0.1.0
+Summary: NCBL ranking prediction + coaching + video pipeline (data-driven, no AI at runtime)
+Author: xchan04
+License: Proprietary
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: openpyxl>=3.1
+Requires-Dist: matplotlib>=3.7
+Requires-Dist: pdfplumber>=0.11
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+
 # ncbl_prediction_script
 
 Reproduce the whole NorCal Beyblade League (NCBL) ranking analysis for **any player** —
@@ -40,14 +54,6 @@ python -m ncbl --help                    # verify
 ```
 Run commands from the repo root as `python -m ncbl …` (re-activate the venv in new shells).
 `.venv/` is gitignored.
-
-**Optional — install as a command.** `pip install -e .` (uses `pyproject.toml`) puts an `ncbl`
-executable on your PATH, so you can run it from any directory without `python -m`:
-```bash
-pip install -e .          # editable install into the venv
-ncbl --help
-ncbl coach --reports ~/Downloads/ --player espiiii --outdir out/
-```
 
 ## Get the data
 

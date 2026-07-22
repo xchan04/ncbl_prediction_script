@@ -25,6 +25,9 @@ python -m ncbl --help                     # verify
 Re-activate the venv (`source .venv/bin/activate`) in any new shell before running commands.
 `.venv/` is gitignored, so it never gets committed.
 
+**Optional:** `pip install -e .` installs an `ncbl` command on your PATH — then use `ncbl …`
+from anywhere instead of `python -m ncbl …` (all examples below work either way).
+
 ## 1. You have the league spreadsheet
 Download it: Google Sheet → **File → Download → Microsoft Excel (.xlsx)**.
 ```bash

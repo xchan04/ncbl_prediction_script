@@ -1,0 +1,2 @@
+[console_scripts]
+ncbl = ncbl.cli:main

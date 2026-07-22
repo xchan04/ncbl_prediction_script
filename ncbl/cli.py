@@ -34,21 +34,31 @@ from . import sheet_source as _SS
 
 
 def _load(args):
-    if not getattr(args, "input", None):
-        raise SystemExit("error: --input is required (a .xlsx / .csv / folder of CSVs, or a shareable "
-                         "sheet URL).\nRun 'python -m ncbl --help' for examples.")
-    if not _SS.is_url(args.input) and not os.path.exists(args.input):
-        raise SystemExit(f"error: input not found: {args.input}\n"
-                         "Pass the league sheet file, a folder of CSVs, or a shareable sheet link (URL).")
     cfg = load_config(args.config)
+    src = getattr(args, "input", None) or cfg.get("ranking_sheet_url")
+    if not src:
+        raise SystemExit("error: no league sheet given. Pass --input (a .xlsx / .csv / folder / sheet URL), "
+                         "or set 'ranking_sheet_url' in --config (see 'ncbl setup').")
+    if not _SS.is_url(src) and not os.path.exists(src):
+        raise SystemExit(f"error: input not found: {src}\n"
+                         "Pass the league sheet file, a folder of CSVs, or a shareable sheet link (URL).")
     try:
-        league = League(cfg).load(args.input)
+        league = League(cfg).load(src)
     except RuntimeError as e:                    # sheet-URL fetch problems come through here
         raise SystemExit(f"error: {e}")
     if not league.by_player:
         raise SystemExit("error: no results found in the input. Check that it's the league sheet and that "
                          "'data_entry_sheet'/'columns' in your config match its layout.")
     return cfg, league
+
+
+def _resolve_player(args, cfg):
+    """--player, falling back to the config's player (set by `ncbl setup`)."""
+    name = getattr(args, "player", None) or cfg.get("player")
+    if not name:
+        raise SystemExit("error: no player given. Pass --player NAME or set 'player' in --config "
+                         "(see 'ncbl setup').")
+    return name
 
 
 def _pkey(league, name):
@@ -74,7 +84,7 @@ def cmd_standings(args):
 
 def cmd_predict(args):
     cfg, league = _load(args)
-    player = _pkey(league, args.player)
+    player = _pkey(league, _resolve_player(args, cfg))
     rep = SIM.predict_report(league, cfg, player, target_rank=args.target, remaining=args.remaining)
     print(f"\n{rep['player']}: #{rep['current_rank']}  {rep['current_score']} pts  "
           f"({rep['n_events']} events, {rep['slots_left']} slots left)")
@@ -93,7 +103,7 @@ def cmd_predict(args):
 
 def cmd_threats(args):
     cfg, league = _load(args)
-    player = _pkey(league, args.player)
+    player = _pkey(league, _resolve_player(args, cfg))
     t = SIM.threats(league, cfg, player, window=args.window)
     print(f"\n=== Overtook {league.name(player)} (last {args.window} events) ===")
     for p, a, b, s in t["overtook"]:
@@ -105,7 +115,7 @@ def cmd_threats(args):
 
 def cmd_report(args):
     cfg, league = _load(args)
-    player = _pkey(league, args.player)
+    player = _pkey(league, _resolve_player(args, cfg))
     h2h = None
     if args.h2h_cache and os.path.isdir(args.h2h_cache):
         seasons = cfg.get("seasons") or {}
@@ -128,12 +138,114 @@ def _slug(name):
     return "".join(c if c.isalnum() else "_" for c in name).strip("_").lower()
 
 
+def _find_meta(meta_dir):
+    """Newest field meta-analysis JSON in meta_dir (by filename), or None."""
+    if not meta_dir or not os.path.isdir(meta_dir):
+        return None
+    import glob
+    js = sorted(glob.glob(os.path.join(meta_dir, "*.json")))
+    return js[-1] if js else None
+
+
+# ---------------- setup / scaffold ----------------
+def cmd_setup(args):
+    root = args.dir or f"{_slug(args.username)}_ncbl"
+    folders = {
+        "reports": "Drop every NCBLAST tournament report here — .pdf OR .json, any tournament, any season.\n"
+                   "More reports = higher-confidence coaching. Filenames don't matter.",
+        "meta": "Drop the field Meta Analysis export here as .json (e.g. ncbl_meta_2026-07-01.json).\n"
+                "The newest file is used automatically for meta-counter picks.",
+        "out": "Generated reports land here (espiiii_coach.html / .txt / .json / _matchups.png).",
+    }
+    made = []
+    for name, blurb in folders.items():
+        d = os.path.join(root, name)
+        os.makedirs(d, exist_ok=True)
+        readme = os.path.join(d, "README.txt")
+        if not os.path.exists(readme):
+            with open(readme, "w") as fh:
+                fh.write(blurb + "\n")
+        made.append(d)
+
+    cfg_path = os.path.join(root, "ncbl.config.json")
+    if os.path.exists(cfg_path) and not args.force:
+        print(f"(kept existing {cfg_path} — pass --force to overwrite)")
+    else:
+        scaffold = {
+            "player": args.username,
+            "ranking_sheet_url": args.ranking_sheet_url or "PASTE_YOUR_GOOGLE_SHEET_LINK_HERE",
+            "reports_dir": "reports",
+            "meta_dir": "meta",
+            "data_entry_sheet": "2026 Season 6 Data Entry",
+            "rankings_sheet": "2026 Season 6 Solo Rankings",
+            "target_rank": 10,
+        }
+        with open(cfg_path, "w") as fh:
+            json.dump(scaffold, fh, indent=2)
+
+    run_md = os.path.join(root, "RUN.md")
+    if not os.path.exists(run_md) or args.force:
+        with open(run_md, "w") as fh:
+            fh.write(_RUN_MD.format(user=args.username))
+
+    print(f"Workspace ready: {root}/")
+    print("  ncbl.config.json   ← your username + sheet link (edit the season tab names if needed)")
+    print("  reports/           ← drop .pdf / .json tournament reports here")
+    print("  meta/              ← drop the field Meta Analysis .json here")
+    print("  out/               ← reports are written here")
+    print("  RUN.md             ← copy-paste commands")
+    if not args.ranking_sheet_url:
+        print("\nNext: paste your Google Sheet link into ncbl.config.json (ranking_sheet_url),")
+        print("      shared 'Anyone with the link -> Viewer'.")
+    print(f"\nThen, from inside {root}/:")
+    print("  python -m ncbl standings --config ncbl.config.json")
+    print("  python -m ncbl coach     --config ncbl.config.json --outdir out")
+
+
+_RUN_MD = """\
+# {user} — NCBL pipeline workspace
+
+Everything here is driven by **ncbl.config.json** (your username + Google Sheet link), so most
+commands don't need `--player` or `--input`. Run them from inside this folder.
+
+## One-time
+Install the pipeline once (from the cloned `ncbl_prediction_script` repo):
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\Activate.ps1
+pip install -e /path/to/ncbl_prediction_script
+```
+Then edit **ncbl.config.json**:
+- `ranking_sheet_url` → your league Google Sheet link (shared "Anyone with the link → Viewer").
+- `data_entry_sheet` / `rankings_sheet` → the tab names for your current season.
+
+## Put your data in
+- `reports/` — every NCBLAST report you have (`.pdf` or `.json`), any tournament/season.
+- `meta/`    — the field Meta Analysis export as `.json` (newest is picked automatically).
+
+## Run
+```bash
+# Ranking side (reads the sheet link from config)
+python -m ncbl standings --config ncbl.config.json
+python -m ncbl report    --config ncbl.config.json --outdir out
+python -m ncbl predict   --config ncbl.config.json
+python -m ncbl threats   --config ncbl.config.json
+
+# Coaching side (reads reports/ + meta/ from config)
+python -m ncbl coach     --config ncbl.config.json --outdir out                       # lifetime
+python -m ncbl coach     --config ncbl.config.json --season "2026 Season 6" --outdir out
+```
+Outputs land in `out/`. The more reports you add, the more comprehensive the coaching gets.
+"""
+
+
+
 def cmd_coach(args):
     cfg = load_config(args.config)
-    reports = CO.load_reports(args.reports)
+    report_paths = args.reports or [cfg.get("reports_dir") or "reports"]
+    reports = CO.load_reports(report_paths)
     if not reports:
-        raise SystemExit("error: no NCBLAST reports could be read from --reports.\n"
-                         "Pass a folder of report .pdf/.json files or one/more file paths.")
+        raise SystemExit(f"error: no NCBLAST reports found in {report_paths}.\n"
+                         "Drop report .pdf/.json files there, or pass --reports <folder|files>.")
     scope = "lifetime"
     if args.season:
         reports = CO.filter_by_season(reports, args.season, cfg.get("seasons") or {})
@@ -142,19 +254,22 @@ def cmd_coach(args):
             raise SystemExit(f"error: no reports fall within season '{args.season}'. "
                              "Check config 'seasons' windows or omit --season for lifetime.")
     players = sorted({str(r["player"]).lower() for r in reports if r.get("player")})
-    if not args.player:
-        raise SystemExit("error: --player is required. Reports contain: " + ", ".join(players))
+    player = getattr(args, "player", None) or cfg.get("player")
+    if not player:
+        raise SystemExit("error: no player given. Pass --player NAME (or set 'player' in --config). "
+                         "Reports contain: " + ", ".join(players))
+    meta_path = getattr(args, "meta", None) or _find_meta(cfg.get("meta_dir"))
     meta_report = None
-    if getattr(args, "meta", None):
+    if meta_path:
         try:
-            with open(args.meta, encoding="utf-8") as fh:
+            with open(meta_path, encoding="utf-8") as fh:
                 meta_report = json.load(fh)
         except Exception as ex:
             print("(meta report skipped:", ex, ")")
     community = None
     if getattr(args, "bd", None):
         community = CO.load_reports(args.bd)
-    res = CO.coach(reports, args.player, scope=scope, meta_report=meta_report, community=community)
+    res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community)
     os.makedirs(args.outdir, exist_ok=True)
     base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
     img = base + "_matchups.png"
@@ -206,14 +321,14 @@ def cmd_video(args):
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     kind = args.kind
     if kind in ("follow", "drop", "climb"):
-        viz.follow(league, cfg, _pkey(league, args.player), args.out,
+        viz.follow(league, cfg, _pkey(league, _resolve_player(args, cfg)), args.out,
                    t_from=args.t_from, t_to=args.t_to,
                    published_end=args.published_end,
                    title=args.title)
     elif kind == "overview":
-        viz.overview(league, cfg, _pkey(league, args.player), args.out, t_from=args.t_from, t_to=args.t_to)
+        viz.overview(league, cfg, _pkey(league, _resolve_player(args, cfg)), args.out, t_from=args.t_from, t_to=args.t_to)
     elif kind == "montecarlo":
-        viz.montecarlo(league, cfg, _pkey(league, args.player), args.out)
+        viz.montecarlo(league, cfg, _pkey(league, _resolve_player(args, cfg)), args.out)
     elif kind == "map":
         viz.regions_map(cfg, args.out)
     elif kind == "hook":
@@ -225,7 +340,7 @@ def cmd_video(args):
 
 def cmd_all(args):
     cfg, league = _load(args)
-    player = _pkey(league, args.player)
+    player = _pkey(league, _resolve_player(args, cfg))
     od = args.outdir; os.makedirs(od, exist_ok=True)
     j = lambda f: os.path.join(od, f)
     print("report (txt/json/html)...")
@@ -242,6 +357,12 @@ def cmd_all(args):
 
 _EPILOG = """\
 examples:
+  # starting from scratch — scaffold a workspace (folders + config), then just use --config:
+  python -m ncbl setup --username espiiii --ranking-sheet-url "https://docs.google.com/spreadsheets/d/<ID>/edit"
+  #   -> creates espiiii_ncbl/ with reports/, meta/, out/, ncbl.config.json, RUN.md
+  #   drop reports into reports/ and the meta export into meta/, then:
+  python -m ncbl coach --config espiiii_ncbl/ncbl.config.json --outdir espiiii_ncbl/out
+
   # get the data either way:
   #   A) open the Google Sheet -> File -> Download -> Excel (.xlsx), or
   #   B) just pass the shareable sheet link ('Anyone with the link -> Viewer')
@@ -268,12 +389,20 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="ncbl", description="NCBL ranking prediction + video pipeline",
         epilog=_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{standings,predict,report,coach,challonge,threats,video,all}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{setup,standings,predict,report,coach,challonge,threats,video,all}")
 
     def common(p):
-        p.add_argument("--input", required=True, metavar="PATH",
-                       help="league sheet: .xlsx workbook, a Data-Entry .csv, or a folder of CSVs")
+        p.add_argument("--input", metavar="PATH",
+                       help="league sheet: .xlsx/.csv/folder or a sheet URL (default: config 'ranking_sheet_url')")
         p.add_argument("--config", metavar="FILE", help="JSON config overriding ncbl/config.py defaults")
+
+    p = sub.add_parser("setup", help="scaffold a workspace (folders + config) for a player from scratch")
+    p.add_argument("--username", required=True, help="player name (any casing)")
+    p.add_argument("--ranking-sheet-url", dest="ranking_sheet_url", metavar="URL",
+                   help="Google Sheet link (or file path) for the league rankings")
+    p.add_argument("--dir", metavar="PATH", help="workspace folder to create (default: <username>_ncbl)")
+    p.add_argument("--force", action="store_true", help="overwrite an existing config / RUN.md")
+    p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("standings", help="print the current standings")
     common(p); p.add_argument("--top", type=int, metavar="N", help="show top N (default 25)")
@@ -281,14 +410,14 @@ def main(argv=None):
 
     p = sub.add_parser("predict", help="probabilities of reaching a target rank for a player")
     common(p)
-    p.add_argument("--player", required=True, help="player name (any casing)")
+    p.add_argument("--player", help="player name (any casing; default: config 'player')")
     p.add_argument("--target", type=int, metavar="RANK", help="target rank (default from config)")
     p.add_argument("--remaining", type=int, metavar="N", help="events the player will still play (default: open slots)")
     p.set_defaults(func=cmd_predict)
 
     p = sub.add_parser("report", help="write a .txt + .json + .html report for a player")
     common(p)
-    p.add_argument("--player", required=True, help="player name (any casing)")
+    p.add_argument("--player", help="player name (any casing; default: config 'player')")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
     p.add_argument("--name", metavar="BASE", help="output basename (default: <player>_report)")
     p.add_argument("--target", type=int, metavar="RANK")
@@ -301,7 +430,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("threats", help="who overtook the player / who can still catch them")
-    common(p); p.add_argument("--player", required=True); p.add_argument("--window", type=int, default=6, metavar="N")
+    common(p); p.add_argument("--player"); p.add_argument("--window", type=int, default=6, metavar="N")
     p.set_defaults(func=cmd_threats)
 
     p = sub.add_parser("video", help="render one visualization")
@@ -316,13 +445,13 @@ def main(argv=None):
     p.set_defaults(func=cmd_video)
 
     p = sub.add_parser("all", help="render every report + video for a player into one folder")
-    common(p); p.add_argument("--player", required=True); p.add_argument("--outdir", default="out", metavar="DIR")
+    common(p); p.add_argument("--player"); p.add_argument("--outdir", default="out", metavar="DIR")
     p.add_argument("--target", type=int, metavar="RANK"); p.add_argument("--remaining", type=int, metavar="N")
     p.set_defaults(func=cmd_all)
 
     p = sub.add_parser("coach", help="analyze NCBLAST match reports (PDF or JSON) -> coaching report + visual")
-    p.add_argument("--reports", required=True, nargs="+", metavar="PATH",
-                   help="a folder of NCBLAST reports, or one/more .pdf/.json paths (more = higher confidence)")
+    p.add_argument("--reports", nargs="+", metavar="PATH",
+                   help="a folder of reports, or .pdf/.json paths (default: config 'reports_dir')")
     p.add_argument("--player", help="player to coach (any casing); reports list their player")
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")

@@ -9,6 +9,11 @@ import json
 import copy
 
 DEFAULTS = {
+    # --- who / where (set by `ncbl setup`; used as CLI fallbacks) ---
+    "player": None,                 # default --player when omitted
+    "ranking_sheet_url": None,      # default --input when omitted (Google Sheet link or file path)
+    "reports_dir": "reports",       # default --reports folder for `coach`
+    "meta_dir": "meta",             # folder scanned for a field meta-analysis JSON
     # --- scoring rule ---
     "best_of": 6,
     "of_first": 10,

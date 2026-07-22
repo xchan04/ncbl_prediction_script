@@ -32,6 +32,30 @@ Re-activate the venv (`source .venv/bin/activate`) in any new shell before runni
 **Optional:** `pip install -e .` installs an `ncbl` command on your PATH — then use `ncbl …`
 from anywhere instead of `python -m ncbl …` (all examples below work either way).
 
+## 0. Starting from scratch? Scaffold a workspace
+If all you have is your name and the league sheet link, let the tool build the folder structure:
+```bash
+ncbl setup --username espiiii --ranking-sheet-url "https://docs.google.com/spreadsheets/d/<ID>/edit"
+```
+This creates `espiiii_ncbl/` with:
+```
+espiiii_ncbl/
+  ncbl.config.json   # your username + sheet link (edit season tab names if needed)
+  reports/           # drop NCBLAST .pdf or .json reports here (any tournament)
+  meta/              # drop the field Meta Analysis .json here (newest is auto-used)
+  out/               # generated reports land here
+  RUN.md             # copy-paste commands
+```
+Then, from inside that folder, `--config ncbl.config.json` supplies your player, sheet, reports,
+and meta automatically — you don't need `--player` / `--input` / `--reports` / `--meta`:
+```bash
+cd espiiii_ncbl
+ncbl standings --config ncbl.config.json
+ncbl report    --config ncbl.config.json --outdir out
+ncbl coach     --config ncbl.config.json --outdir out                        # lifetime
+ncbl coach     --config ncbl.config.json --season "2026 Season 6" --outdir out
+```
+
 ## 1. You have the league spreadsheet
 Two ways to point the tool at it:
 - **A file** — Google Sheet → **File → Download → Microsoft Excel (.xlsx)**, then use its path.

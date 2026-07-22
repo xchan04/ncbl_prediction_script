@@ -115,6 +115,33 @@ def test_launch_balanced_no_weakness():
     assert not any(w["type"] == "launch" for w in res["weaknesses"])
 
 
+def test_community_benchmark_flags_field_outperformance():
+    # espiiii is 1-4 vs Wizard Rod; two other players go a combined 8-2 vs it -> field solves it
+    reps = [_rep("A", combos=[("Aero 1-60 Rush", 40, -0.1, 10, "B")],
+                 matchups=[("Aero 1-60 Rush", "Wizard Rod 3-70 Attack", 5, 1, 4)])]
+    other1 = _rep("A", combos=[("Cobalt 9-60 Elevate", 80, 1.0, 12, "S")],
+                  matchups=[("Cobalt 9-60 Elevate", "Wizard Rod 3-70 Attack", 5, 4, 1)])
+    other1["player"] = "rivalA"
+    other2 = _rep("B", combos=[("Cobalt 9-60 Elevate", 80, 1.0, 12, "S")],
+                  matchups=[("Cobalt 9-60 Elevate", "Wizard Rod 3-70 Attack", 5, 4, 1)])
+    other2["player"] = "rivalB"
+    res = C.coach(reps + [other1, other2], "espiiii")
+    b = next((x for x in res["benchmarks"] if "Wizard Rod" in x["opp"]), None)
+    assert b is not None
+    assert b["you_pct"] == 20.0          # 1-4
+    assert b["field_pct"] == 80.0        # 8-2 across the two rivals
+    assert "Cobalt 9-60 Elevate" in b["suggestion"]   # field wins most with Cobalt
+
+
+def test_community_benchmark_empty_with_only_you():
+    reps = [_rep("A", combos=[("Aero 1-60 Rush", 40, -0.1, 10, "B")],
+                 matchups=[("Aero 1-60 Rush", "Wizard Rod 3-70 Attack", 5, 1, 4)])]
+    res = C.coach(reps, "espiiii")
+    assert res["benchmarks"] == []                     # no other players -> no field
+    assert res["community"]["n_players"] == 1
+    assert "community benchmark unlocks" in C.coach_txt(res).lower()
+
+
 def test_combo_parts_split():
     assert C.combo_parts("Shark Scale 9-60 Free Ball") == ("Shark Scale", "9-60", "Free Ball")
     assert C.combo_parts("Cobalt Dragoon 9-60 Elevate") == ("Cobalt Dragoon", "9-60", "Elevate")

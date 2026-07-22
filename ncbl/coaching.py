@@ -17,6 +17,8 @@ MIN_MATCHUP_FACED = 3      # aggregated encounters before a matchup finding coun
 MIN_SWAP_FACED = 2         # encounters for a combo to be a recommended answer
 MIN_SIDE_BATTLES = 6       # battles on a side before its win% is trusted
 SIDE_GAP = 8.0             # win% gap between sides that flags a positioning weakness
+MIN_COMMUNITY_BTL = 4      # community battles vs a combo before its field win% is trusted
+COMMUNITY_GAP = 15.0       # win% the field beats you by before a matchup is flagged as winnable
 
 
 # ---------------- loading ----------------
@@ -222,6 +224,47 @@ def build_meta(reports):
     return dict(sorted(freq.items(), key=lambda z: -z[1]))
 
 
+# ---------------- community benchmark (any players) ----------------
+def community_benchmark(reports):
+    """Pool every player's recurring matchups into a field-wide benchmark.
+
+    Each report's matchup rows are that player's own combo vs an opponent combo,
+    so summing across all reports gives the community's aggregate record. The
+    benchmark gets sharper as more players' reports are fed (n_players grows).
+    Returns per-opponent-combo and per-(your_combo, opponent_combo) field win%s.
+    """
+    by_opp = defaultdict(lambda: [0, 0, set()])           # opp -> [w, l, {players}]
+    by_pair = defaultdict(lambda: [0, 0, set()])          # (your,opp) -> [w, l, {players}]
+    for r in reports:
+        p = str(r.get("player", "")).lower()
+        for m in r["matchups"]:
+            by_opp[m["opp_combo"]][0] += m["wins"]
+            by_opp[m["opp_combo"]][1] += m["losses"]
+            by_opp[m["opp_combo"]][2].add(p)
+            key = (m["your_combo"], m["opp_combo"])
+            by_pair[key][0] += m["wins"]
+            by_pair[key][1] += m["losses"]
+            by_pair[key][2].add(p)
+    players = {str(r.get("player", "")).lower() for r in reports if r.get("player")}
+
+    def fin(rec):
+        w, l, ps = rec
+        n = w + l
+        return {"wins": w, "losses": l, "battles": n, "n_players": len(ps),
+                "win_pct": round(100 * w / n, 1) if n else 0.0}
+    return {"by_opp": {k: fin(v) for k, v in by_opp.items()},
+            "by_pair": {k: fin(v) for k, v in by_pair.items()},
+            "n_players": len(players)}
+
+
+def _pair_leaders(comm, opp, exclude_combo=None, top=2):
+    """The your-combos the field uses most successfully vs `opp` (field win% desc)."""
+    rows = [(yc, s) for (yc, oc), s in comm["by_pair"].items()
+            if oc == opp and s["battles"] >= MIN_COMMUNITY_BTL and yc != exclude_combo]
+    rows.sort(key=lambda z: (-z[1]["win_pct"], -z[1]["battles"]))
+    return rows[:top]
+
+
 # ---------------- confidence ----------------
 def confidence(agg):
     e, b = agg["n_events"], agg["total_battles"]
@@ -244,6 +287,7 @@ def coach(reports, player, scope="lifetime"):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
+    comm = community_benchmark(reports)
     conf = confidence(agg)
     weaknesses, strengths, swaps, meta_notes = [], [], [], []
 
@@ -319,6 +363,37 @@ def coach(reports, player, scope="lifetime"):
     # launch / positioning: B-side vs X-side split
     launch = _launch_finding(agg.get("side") or {}, weaknesses, strengths)
 
+    # community matchup benchmark: your win% vs the field's win% per opponent combo.
+    # The field excludes your own games, so it only fires once OTHER players' reports
+    # are in the pool — that is the incentive to grow the platform.
+    benchmarks = []
+    for opp, (pw, pl) in agg["matchups_opp"].items():
+        played = pw + pl
+        if played < MIN_MATCHUP_FACED:
+            continue
+        cs = comm["by_opp"].get(opp)
+        if not cs:
+            continue
+        fw, fl = cs["wins"] - pw, cs["losses"] - pl      # field = everyone but you
+        fn = fw + fl
+        if fn < MIN_COMMUNITY_BTL:
+            continue
+        you_pct = round(100 * pw / played, 1)
+        field_pct = round(100 * fw / fn, 1)
+        gap = round(field_pct - you_pct, 1)
+        if gap >= COMMUNITY_GAP and you_pct < 50:
+            leaders = _pair_leaders(comm, opp)
+            tip = ""
+            if leaders:
+                yc, s = leaders[0]
+                tip = f" The field wins most with {yc} ({s['win_pct']}% over {s['battles']} btl)."
+            benchmarks.append({
+                "opp": opp, "record": f"{pw}-{pl}", "you_pct": you_pct, "field_pct": field_pct,
+                "gap": gap, "field_btl": fn, "n_players": cs["n_players"],
+                "text": f"vs {opp}: you win {you_pct}% but the field wins {field_pct}% ({fn} field btl)",
+                "suggestion": f"This matchup is winnable — study how the field solves {opp}.{tip}"})
+    benchmarks.sort(key=lambda z: -z["gap"])
+
     # meta: most common field combos you must beat
     for opp, freq in list(meta.items())[:6]:
         rec = agg["matchups_opp"].get(opp)
@@ -331,6 +406,7 @@ def coach(reports, player, scope="lifetime"):
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
             "rivals": rivals, "recommendation": recommend(agg, meta),
             "launch": launch, "side": agg.get("side") or {},
+            "benchmarks": benchmarks, "community": {"n_players": comm["n_players"]},
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
             "opp_players": agg["opp_players"]}
 
@@ -528,6 +604,16 @@ def coach_txt(d):
         L.append(f"  vs {s['opp']} (you {s['record']}) -> {s['suggestion']}")
     if not d["swaps"]:
         L.append("  (none — no clean in-deck answer found for your losing matchups)")
+    L.append("\nVS THE FIELD — matchups the community solves better than you")
+    for b in d.get("benchmarks", []):
+        L.append(f"  vs {b['opp']} (you {b['record']}): you {b['you_pct']}% vs field {b['field_pct']}% [+{b['gap']}%, {b['field_btl']} field btl]")
+        L.append(f"      -> {b['suggestion']}")
+    if not d.get("benchmarks"):
+        np = (d.get("community") or {}).get("n_players", 0)
+        if np <= 1:
+            L.append("  (community benchmark unlocks once other players' reports are added — right now the pool is only you)")
+        else:
+            L.append("  (no matchup where the field clearly outperforms you)")
     L.append(f"\nRIVALS — your head-to-head ({d.get('scope','lifetime')})")
     for r in d.get("rivals", []):
         tag = "  <-- nemesis" if r["losses"] > r["wins"] and r["played"] >= 2 else ""
@@ -563,6 +649,23 @@ def coach_html(d, cfg, image_path=None):
     swaps = block("Matchup swaps", d["swaps"], lambda s:
                   f'<div class="row"><span class="dot" style="background:{orange}"></span>'
                   f'<b>vs {e(s["opp"])}</b> — you {e(s["record"])}<div class="sug">{e(s["suggestion"])}</div></div>')
+
+    # community benchmark — you vs the field per matchup
+    def bench_row(b):
+        return (f'<div class="row"><span class="dot" style="background:{red}"></span>'
+                f'<b>vs {e(b["opp"])}</b> — you {e(b["record"])} '
+                f'<span style="color:{red}">{b["you_pct"]}%</span> vs field '
+                f'<span style="color:{green}">{b["field_pct"]}%</span>'
+                f'<span class="tag">+{b["gap"]}%, {b["field_btl"]} btl</span>'
+                f'<div class="sug">{e(b["suggestion"])}</div></div>')
+    if d.get("benchmarks"):
+        benchmarks_html = '<h2>Vs the field — matchups the community solves better</h2>' + "".join(bench_row(b) for b in d["benchmarks"])
+    else:
+        np = (d.get("community") or {}).get("n_players", 0)
+        msg = ("Community benchmark unlocks once other players' reports are added — the pool is only you right now."
+               if np <= 1 else "No matchup where the field clearly outperforms you.")
+        benchmarks_html = f'<h2>Vs the field</h2><div class="sub">{e(msg)}</div>'
+
     meta = block("Meta — field you keep facing", d["meta"],
                  lambda m: f'<div class="row"><span class="dot" style="background:{muted}"></span>{e(m["text"])}</div>')
 
@@ -648,6 +751,7 @@ def coach_html(d, cfg, image_path=None):
    <div class="nudge">▲ Feed more reports: {_next_tier(c).replace('**','')}</div></div>
  {recommendation}
  {strengths}{weaknesses}{swaps}
+ {benchmarks_html}
  {launch_html}
  <h2>Rivals — head-to-head ({e(scope)})</h2>
  <table><thead><tr><th>Opponent</th><th style="text-align:right">Record</th><th style="text-align:right">Win%</th><th style="text-align:right">Sets</th></tr></thead>

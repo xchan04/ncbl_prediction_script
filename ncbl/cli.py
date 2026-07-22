@@ -504,7 +504,11 @@ def cmd_coach(args):
         h2h_extra = CH.head_to_head(extra, player)
         all_events = report_events | {re.sub(r"\s+", "", str(t["name"]).lower()) for t in tournaments}
         events_attended = max(events_attended or 0, len(all_events))
-        print(f"[challonge: {len(tournaments)} bracket(s), {len(extra)} without a report -> merged into rivals]")
+        merged = ", ".join(t["name"] for t in extra) or "none"
+        print(f"[challonge: {len(tournaments)} bracket(s); {len(extra)} without a matching report "
+              f"-> merged into rivals: {merged}]")
+        print("  (if a bracket you DO have a report for is listed above, its name didn't match the "
+              "report's event title — tell me and I'll map it so it isn't double-counted.)")
 
     res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community,
                    events_attended=events_attended, h2h_extra=h2h_extra)
@@ -547,9 +551,9 @@ def cmd_challonge(args):
         raise SystemExit("error: no tournaments loaded.\n  " + "\n  ".join(missed))
     if missed:
         print("(skipped:", "; ".join(m.split(':')[0] for m in missed), ")")
-    a = CH.analyze(tournaments, args.player)
+    a = CH.analyze(tournaments, _resolve_player(args, cfg))
     os.makedirs(args.outdir, exist_ok=True)
-    base = os.path.join(args.outdir, _slug(args.player) + "_h2h")
+    base = os.path.join(args.outdir, _slug(_resolve_player(args, cfg)) + "_h2h")
     paths = CH.write_all(a, cfg, base)
     print(CH.to_txt(a))
     print(f"[{len(tournaments)} tournament(s) · cache: {args.cache}]")
@@ -710,7 +714,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_coach)
 
     p = sub.add_parser("challonge", help="head-to-head records from Challonge brackets (needs a free API key)")
-    p.add_argument("--player", required=True, help="player to build head-to-head for")
+    p.add_argument("--player", help="player to build head-to-head for (default: config 'player')")
     p.add_argument("--slugs", nargs="+", metavar="ID", help="Challonge tournament ids, e.g. ncbl-goonday")
     p.add_argument("--links", metavar="FILE", help="txt/md/json file of Challonge links (one per tournament)")
     p.add_argument("--from-sheet", dest="from_sheet", metavar="PATH", help="harvest Challonge links from a Data-Entry sheet")

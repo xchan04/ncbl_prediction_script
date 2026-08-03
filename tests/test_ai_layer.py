@@ -74,3 +74,177 @@ def test_analyze_happy_path_with_mocked_client(monkeypatch):
     notes, err = AI.analyze(_res(), api_key="sk-test")
     assert err is None
     assert "stamina grinder" in notes and "spin gap" in notes.lower()
+
+
+def _rank():
+    """A minimal ranking report (report.build output shape)."""
+    return {"player": "espiiii", "current_rank": 12, "current_score": 14.2, "n_events": 7,
+            "slots_left": 3, "target_rank": 10, "cutoff": 15.1, "open_spots": 0, "field_size": 40,
+            "window": 6,
+            "predictions": [{"strategy": "win out", "total": 18.0, "p_top": 0.82, "p_stage": None, "median_rank": 7},
+                            {"strategy": "do nothing", "total": 14.2, "p_top": 0.10, "p_stage": None, "median_rank": 13}],
+            "threats": {"overtook": [{"player": "Teefoh", "from_rank": 11, "to_rank": 9, "score": 15.5,
+                                      "h2h": {"record": "1-2", "wins": 1, "losses": 2, "win_pct": 33.3}}],
+                        "live": [{"player": "Oyapapi", "rank": 14, "score": 13.8, "slots_left": 4, "h2h": None}]},
+            "standings": [{"rank": 9, "player": "Teefoh", "score": 15.5, "events": 8},
+                          {"rank": 12, "player": "espiiii", "score": 14.2, "events": 7}]}
+
+
+def test_plan_prompt_embeds_ranking_and_rivals():
+    p = AI.build_plan_prompt(_rank())
+    assert "espiiii" in p and "Teefoh" in p and "BATTLE PLAN" in p
+    assert "win out" in p and "1-2" in p            # scenario + head-to-head both reach the model
+
+
+def test_plan_compact_trims_to_cutoff_neighbourhood():
+    c = AI._compact_plan(_rank())
+    assert c["target_rank"] == 10 and c["current_rank"] == 12
+    assert c["overtook_me"][0]["player"] == "Teefoh" and c["overtook_me"][0]["h2h"] == "1-2"
+    assert all(s["rank"] <= 15 for s in c["standings_near_cutoff"])
+
+
+def test_plan_to_html_and_txt_render():
+    html = AI.plan_to_html("## Path\n- win two events", {})
+    assert "AI battle plan" in html and "<li>win two events</li>" in html
+    assert "battle plan" in AI.plan_to_txt("x").lower()
+
+
+def test_battleplan_happy_path_with_mocked_client(monkeypatch):
+    block = types.SimpleNamespace(type="text", text="Standing read: you are two good events from Top-10.")
+    resp = types.SimpleNamespace(content=[block], stop_reason="end_turn")
+
+    class _Msgs:
+        def create(self, **kw):
+            assert "BATTLE PLAN" in kw["messages"][0]["content"]
+            return resp
+
+    class _Fake:
+        messages = _Msgs()
+
+    monkeypatch.setattr(AI, "_client", lambda key: _Fake())
+    plan, err = AI.battleplan(_rank(), api_key="sk-test")
+    assert err is None and "Top-10" in plan
+
+
+def test_battleplan_degrades_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    plan, err = AI.battleplan(_rank(), cfg={})
+    assert plan is None and isinstance(err, str) and err
+
+
+# ---------------- reconciliation layer ----------------
+def test_parse_json_pulls_object_out_of_prose():
+    assert AI._parse_json('junk {"a": 1} trailing')["a"] == 1
+    assert AI._parse_json("not json at all") is None
+    assert AI._parse_json("") is None
+
+
+def test_parse_json_tolerates_markdown_newlines_and_fences():
+    # Claude returns a 'narrative' with REAL newlines (markdown) — strict JSON would reject it,
+    # which previously leaked the raw {"narrative": ...} into the report.
+    payload = '{\n  "narrative": "## Read\nYou are a grinder.\n- Fix spin.",\n  "top10": "Close." \n}'
+    r = AI._parse_json(payload)
+    assert r is not None and r["narrative"].startswith("## Read") and "\n" in r["narrative"]
+    fenced = "```json\n" + payload + "\n```"
+    assert AI._parse_json(fenced)["narrative"].startswith("## Read")
+
+
+def test_reconcile_prompt_asks_for_conflicts_and_combo_calls():
+    assert "conflicts" in AI.TASK_RECONCILE and "combo_calls" in AI.TASK_RECONCILE
+    assert "make it agree" in AI.TASK_RECONCILE
+
+
+def test_reconcile_parses_structured_json(monkeypatch):
+    payload = ('{"narrative": "You are a grinder.", '
+               '"conflicts": [{"topic": "Wizard Rod", "resolution": "1-60 Hexa is the answer; bench note is the 6-60"}], '
+               '"combo_calls": [{"combo": "Shark Scale 9-60 Free Ball", "call": "anchor", "why": "stamina core"}], '
+               '"recommendation_note": "Drop the 5-60 Cobalt.", "top10": "Realistic with two clean events."}')
+    block = types.SimpleNamespace(type="text", text=payload)
+    resp = types.SimpleNamespace(content=[block], stop_reason="end_turn")
+
+    class _Fake:
+        messages = types.SimpleNamespace(create=lambda **kw: resp)
+
+    monkeypatch.setattr(AI, "_client", lambda key: _Fake())
+    rec, err = AI.reconcile(_res(), api_key="sk-test")
+    assert err is None
+    assert rec["conflicts"][0]["topic"] == "Wizard Rod"
+    assert rec["combo_calls"][0]["call"] == "anchor"
+    assert rec["recommendation_note"] == "Drop the 5-60 Cobalt."
+
+
+def test_reconcile_falls_back_to_narrative_on_bad_json(monkeypatch):
+    block = types.SimpleNamespace(type="text", text="Sorry, here is prose with no json object.")
+    resp = types.SimpleNamespace(content=[block], stop_reason="end_turn")
+
+    class _Fake:
+        messages = types.SimpleNamespace(create=lambda **kw: resp)
+
+    monkeypatch.setattr(AI, "_client", lambda key: _Fake())
+    rec, err = AI.reconcile(_res(), api_key="sk-test")
+    assert err is None and rec["narrative"].startswith("Sorry")
+    assert rec["conflicts"] == [] and rec["combo_calls"] == []
+
+
+def test_combo_call_map_normalizes_and_renders():
+    rec = {"combo_calls": [{"combo": "Shark Scale 9-60 Free Ball", "call": "anchor", "why": "core"}],
+           "conflicts": [{"topic": "WR", "resolution": "x"}], "top10": "close"}
+    m = AI.combo_call_map(rec)
+    assert m["shark scale 9-60 free ball"]["call"] == "anchor"
+    html = AI.to_html("notes", {}, rec)
+    assert "Conflicts reconciled" in html and "ANCHOR" in html and "Top-10 verdict" in html
+    txt = AI.to_txt("notes", rec)
+    assert "reconciled by AI" in txt and "ANCHOR" in txt
+
+
+# ---------------- prompt hardening (spin gap + accuracy guards) ----------------
+def _res_grounded():
+    r = _res()
+    r["grounded"] = {
+        "inventory": {"blades": {"Shark Scale": 60}, "ratchets": {}, "bits": {}},
+        "landscape": {"spin_mix": {"right": 9, "left": 1}, "role_mix": {"attack": 7},
+                      "n_distinct": 36, "combos": []},
+        "gaps": [], "meta_alignment": {"off_meta": False, "archetypes": []},
+        "diagnoses": [
+            {"combo": "A", "verdict": "fine", "peer_gap": 15.0, "battles": 63, "n_peers": 3, "reasons": []},
+            {"combo": "B", "verdict": "at_par", "peer_gap": -4.9, "battles": 46, "n_peers": 35, "reasons": []},
+            {"combo": "C", "verdict": "insufficient_data", "peer_gap": None, "battles": 8, "n_peers": 0, "reasons": []},
+        ],
+        "policy": "owned parts only",
+    }
+    return r
+
+
+def test_spin_analysis_is_precomputed_for_the_model():
+    """The raw spin_mix was already sent and got ignored — the conclusion must be explicit."""
+    g = AI._compact(_res_grounded())["grounded"]
+    note = g["field_landscape"]["SPIN_ANALYSIS"]
+    assert "9 of the 10" in note and "right-spin" in note and "EQUALIZATION" in note
+
+
+def test_verdict_tally_prevents_miscounting():
+    """The model once invented a 'skill_gap' bucket; give it exact counts and members."""
+    g = AI._compact(_res_grounded())["grounded"]
+    assert g["VERDICT_TALLY"] == {"fine": 1, "at_par": 1, "insufficient_data": 1}
+    assert "skill_gap" not in g["VERDICT_TALLY"]
+    assert g["VERDICT_MEMBERS"]["fine"] == ["A"]
+
+
+def test_reconcile_prompt_carries_spin_and_accuracy_rules():
+    t = AI.TASK_RECONCILE
+    assert "SPIN DIRECTION" in t and "MUST address spin coverage" in t
+    assert "ACCURACY RULES" in t
+    assert "never promote a low-battle combo" in t.lower() or "never promote a low-battle" in t
+    assert "VERDICT_TALLY" in t
+
+
+def test_battleplan_combat_profile_has_spin_and_sample_size():
+    cb = AI._compact_combat(_res_grounded())
+    assert cb["spin_analysis"] and "right-spin" in cb["spin_analysis"]
+    assert cb["part_vs_skill_tally"]["fine"] == 1
+    # battle/event counts must ride along so thin samples cannot be praised blindly
+    assert "events" in next(iter(cb["top_combos"].values()))
+
+
+def test_plan_prompt_has_accuracy_and_spin_guards():
+    assert "ACCURACY" in AI.TASK_PLAN and "SPIN" in AI.TASK_PLAN

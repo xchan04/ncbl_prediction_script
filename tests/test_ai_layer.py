@@ -248,3 +248,42 @@ def test_battleplan_combat_profile_has_spin_and_sample_size():
 
 def test_plan_prompt_has_accuracy_and_spin_guards():
     assert "ACCURACY" in AI.TASK_PLAN and "SPIN" in AI.TASK_PLAN
+
+
+def test_prompts_guard_heading_mismatch_and_vagueness():
+    """A real run produced the heading 'Bench your anchors' over a list of dead weight."""
+    for t in (AI.TASK_RECONCILE, AI.TASK_PLAN):
+        assert "Bench your anchors" in t          # the exact failure is named so it is not repeated
+        assert "ACTIONABILITY" in t
+    assert "Name exact combos" in AI.TASK_RECONCILE
+
+
+def test_combat_profile_carries_rival_answers():
+    """Without this the plan can only say 'scout the bracket' instead of naming an answer."""
+    r = _res_grounded()
+    r["prediction"] = {"scouting": [
+        {"opponent": "Oyapapi", "record": "0-2", "losing": True, "predictability": 0,
+         "readout": None, "answers": []},
+        {"opponent": "Bobablade", "record": "1-2", "losing": True, "predictability": 47,
+         "readout": [{"combo": "Silver Wolf 9-60 Orb"}],
+         "answers": [{"vs": "Phoenix Wing 1-60 Rush", "bring": "Cobalt Dragoon 9-60 Elevate", "record": "4-0"}]},
+        {"opponent": "SHKR", "record": "2-1", "losing": False, "predictability": 100,
+         "readout": None, "answers": []},
+    ], "meta_counter": {}}
+    cb = AI._compact_combat(r)
+    opps = [x["opp"] for x in cb["rival_answers"]]
+    assert "Oyapapi" in opps and "Bobablade" in opps
+    assert "SHKR" not in opps                      # only rivals you are LOSING to
+    oya = next(x for x in cb["rival_answers"] if x["opp"] == "Oyapapi")
+    assert oya["your_answers"] == []               # honest "no owned answer"
+    bob = next(x for x in cb["rival_answers"] if x["opp"] == "Bobablade")
+    assert bob["your_answers"][0]["bring"] == "Cobalt Dragoon 9-60 Elevate"
+
+
+def test_combat_profile_includes_deck_part_conflicts():
+    r = _res_grounded()
+    r["recommendation"] = {"deck": [{"combo": "Shark Scale 9-60 Free Ball"}],
+                           "part_conflicts": [{"combo": "Cobalt Dragoon 9-60 Elevate",
+                                               "clash": "Ratchet '9-60'"}]}
+    cb = AI._compact_combat(r)
+    assert cb["deck_part_conflicts"][0]["clash"] == "Ratchet '9-60'"

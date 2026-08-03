@@ -214,7 +214,18 @@ TASK_RECONCILE = (
     "turns a losing same-spin stamina race into an equalization win.\n"
     "* You MUST address spin coverage explicitly. State the field's spin mix, whether the player's "
     "deck can answer it, and which owned blade provides the opposite spin. If the deck is all one "
-    "spin, call it out as a structural gap even when every individual combo looks healthy.\n\n"
+    "spin, call it out as a structural gap even when every individual combo looks healthy.\n"
+    "\n"
+    "WORDING AND ACTIONABILITY:\n"
+    "* Every heading must match its own content. Do not write 'Bench your anchors' when you mean "
+    "'cut the dead weight' — a heading that contradicts its body makes the whole report look "
+    "careless. Use the combo-call vocabulary precisely: anchor / keep / tune / bench each mean "
+    "something specific, and no combo should be described with a word other than its own call.\n"
+    "* Name exact combos from `owned_parts`, never generic concepts. Write 'bring Cobalt Dragoon "
+    "5-60 Elevate', not 'bring a left-spin blade' — the player has to be able to act on it "
+    "without translating.\n"
+    "* When you name an opponent as a threat, say what to do about it. If `deck_gaps` shows no "
+    "owned answer, say so plainly rather than implying one exists.\n\n"
     "REPORT JSON:\n"
 )
 
@@ -284,7 +295,15 @@ TASK_PLAN = (
     "sample size — a combo with few battles or from a single event is 'promising, needs testing', "
     "never a core recommendation for a must-win event; say the battle count when you praise it.\n"
     "SPIN: if `combat_profile.spin_analysis` is present, address spin coverage explicitly — an "
-    "opposite-spin blade converts a losing same-spin stamina race into an equalization win.\n\nJSON:\n"
+    "opposite-spin blade converts a losing same-spin stamina race into an equalization win.\n"
+    "WORDING: every bullet heading must match its own content. Do not write 'Bench your anchors' "
+    "when you mean 'cut the dead weight' — a heading that contradicts its body makes the advice "
+    "look careless and the reader distrust the rest. Keep the vocabulary consistent with the "
+    "combo calls: anchor / keep / tune / bench mean specific things; never apply one word to a "
+    "combo you graded differently.\n"
+    "ACTIONABILITY: when you prescribe a fix the player owns the parts for, NAME the exact combo "
+    "from their inventory rather than the generic concept ('bring Cobalt Dragoon 5-60 Elevate', "
+    "not 'bring a left-spin blade').\n\nJSON:\n"
 )
 
 
@@ -319,6 +338,16 @@ def _compact_combat(res):
         "deck_part_conflicts": rec.get("part_conflicts"),
         "nemeses": [{"opp": n.get("player"), "record": n.get("record"),
                      "recent": (n.get("recent") or {}).get("form")} for n in res.get("nemeses", [])],
+        # per-rival: what they bring and whether any owned combo beats it. Without this the plan
+        # can only say "scout the bracket" instead of naming a concrete answer or admitting none.
+        "rival_answers": [{"opp": s.get("opponent"), "record": s.get("record"),
+                           "predictability": s.get("predictability"),
+                           "likely_combos": [p.get("combo") for p in (s.get("readout") or [])][:3],
+                           "your_answers": [{"vs": a.get("vs"), "bring": a.get("bring"),
+                                             "record": a.get("record")}
+                                            for a in (s.get("answers") or [])]}
+                          for s in ((res.get("prediction") or {}).get("scouting") or [])
+                          if s.get("losing")][:6],
         "spin_analysis": spin_note,
         "field_spin_mix": spin_mix,
         "part_vs_skill_tally": {v: sum(1 for d in (g.get("diagnoses") or [])

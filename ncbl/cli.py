@@ -126,8 +126,36 @@ def cmd_report(args):
             h2h = CH.head_to_head(tours, league.name(player))
     data = R.build(league, cfg, player, target_rank=args.target,
                    remaining=args.remaining, window=args.window, top=args.top or 25, h2h=h2h)
+    if getattr(args, "use_ai", False):
+        from . import ai_layer as AI
+        # Ground the climb plan in how the player actually fights: load their reports and build a
+        # compact combat profile (degrade quietly if there are none / player isn't in them).
+        combat = None
+        try:
+            reps = CO.load_reports(cfg.get("reports_dir") or "reports")
+            if args.season:
+                reps = CO.filter_by_season(reps, args.season, cfg.get("seasons") or {})
+            if reps:
+                meta_path = _find_meta(cfg.get("meta_dir"))
+                meta_report = None
+                if meta_path:
+                    with open(meta_path, encoding="utf-8") as fh:
+                        meta_report = json.load(fh)
+                cres = CO.coach(reps, player, scope=args.season or "lifetime", meta_report=meta_report)
+                combat = AI._compact_combat(cres)
+        except Exception as ex:
+            print(f"(combat profile for the battle plan skipped: {ex})")
+        print(f"[AI Beyblade Analyst: building the battle plan via {args.ai_model} — this may take a moment ...]")
+        plan, err = AI.battleplan(data, api_key=getattr(args, "ai_key", None), model=args.ai_model,
+                                  cfg=cfg, combat=combat)
+        if plan:
+            data["ai_plan"] = plan
+            print("[AI Beyblade Analyst: battle plan attached"
+                  + (" · grounded in your combat stats]" if combat else "]"))
+        else:
+            print(f"[AI Beyblade Analyst skipped: {err}]")
     os.makedirs(args.outdir, exist_ok=True)
-    base = os.path.join(args.outdir, args.name or _slug(data["player"]) + "_report")
+    base = os.path.join(args.outdir, args.name or _slug(data["player"]) + "_goal_strategy")
     paths = R.write_all(data, cfg, base)
     print(R.to_txt(data))
     if h2h:
@@ -523,19 +551,35 @@ def cmd_coach(args):
         if manual:
             print(f"[manual head-to-head: {len(manual)} opponent record(s) merged from {args.h2h_file}]")
 
+    # parts reference DB: grounds every recommendation in hardware the player owns
+    parts_db = None
+    pdb_path = getattr(args, "parts_db", None) or os.path.join(cfg.get("meta_dir") or "meta", "parts_db.json")
+    if os.path.exists(pdb_path):
+        try:
+            with open(pdb_path, encoding="utf-8") as fh:
+                parts_db = json.load(fh)
+            c = (parts_db.get("meta") or {}).get("counts") or {}
+            print(f"[parts DB: {c.get('blades', 0)} blades / {c.get('ratchets', 0)} ratchets / "
+                  f"{c.get('bits', 0)} bits — recommendations grounded to owned parts]")
+        except Exception as ex:
+            print(f"(parts DB skipped: {ex})")
+
     res = CO.coach(reports, player, scope=scope, meta_report=meta_report, community=community,
-                   events_attended=events_attended, h2h_extra=h2h_extra)
+                   events_attended=events_attended, h2h_extra=h2h_extra, parts_db=parts_db)
     if getattr(args, "use_ai", False):
         from . import ai_layer as AI
-        print(f"[AI analyst layer: asking your personal Claude ({args.ai_model}) — this may take a moment ...]")
-        notes, err = AI.analyze(res, api_key=getattr(args, "ai_key", None), model=args.ai_model, cfg=cfg)
-        if notes:
-            res["ai_notes"] = notes
-            print("[AI analyst layer: attached]")
+        print(f"[AI Beyblade Analyst: reviewing & reconciling the stats via {args.ai_model} — "
+              "this may take a moment ...]")
+        rec, err = AI.reconcile(res, api_key=getattr(args, "ai_key", None), model=args.ai_model, cfg=cfg)
+        if rec:
+            res["ai_notes"] = rec.get("narrative") or ""
+            res["ai_reconcile"] = {k: v for k, v in rec.items() if k != "narrative"}
+            nconf = len(res["ai_reconcile"].get("conflicts") or [])
+            print(f"[AI Beyblade Analyst: attached · {nconf} conflict(s) reconciled]")
         else:
-            print(f"[AI analyst layer skipped: {err}]")
+            print(f"[AI Beyblade Analyst skipped: {err}]")
     os.makedirs(args.outdir, exist_ok=True)
-    base = os.path.join(args.outdir, _slug(res["player"]) + "_coach")
+    base = os.path.join(args.outdir, getattr(args, "name", None) or _slug(res["player"]) + "_stat_reports")
     img = base + "_matchups.png"
     try:
         viz.matchup_chart(res, cfg, img)
@@ -693,6 +737,12 @@ def main(argv=None):
     p.add_argument("--h2h-cache", dest="h2h_cache", metavar="DIR",
                    help="Challonge cache dir; annotates rivals with your head-to-head record")
     p.add_argument("--season", metavar="NAME", help="scope head-to-head to a season window (default: lifetime)")
+    p.add_argument("--use-ai", dest="use_ai", action="store_true",
+                   help="append an AI battle plan (road to the top) via your personal Claude account")
+    p.add_argument("--ai-key", dest="ai_key", metavar="KEY",
+                   help="Anthropic API key (else ANTHROPIC_API_KEY / config anthropic_api_key / anthropic_key_file)")
+    p.add_argument("--ai-model", dest="ai_model", metavar="M", default="claude-opus-4-8",
+                   help="Claude model for the battle plan (default: claude-opus-4-8)")
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("threats", help="who overtook the player / who can still catch them")
@@ -721,8 +771,12 @@ def main(argv=None):
     p.add_argument("--player", help="player to coach (any casing); reports list their player")
     p.add_argument("--config", metavar="FILE", help="optional JSON config (theme, etc.)")
     p.add_argument("--outdir", default="out", metavar="DIR", help="output folder (default: out/)")
+    p.add_argument("--name", metavar="BASE", help="output basename (default: <player>_stat_reports)")
     p.add_argument("--season", metavar="NAME", help="scope to a season window (default: lifetime = all reports)")
     p.add_argument("--meta", metavar="FILE", help="optional field meta-analysis JSON -> meta-counter picks")
+    p.add_argument("--parts-db", dest="parts_db", metavar="FILE",
+                   help="parts reference JSON (default: <meta_dir>/parts_db.json) — grounds "
+                        "recommendations in parts the player owns")
     p.add_argument("--input", metavar="PATH",
                    help="league sheet (.xlsx/.csv/folder/URL) -> confidence reflects true events attended "
                         "(default: config 'ranking_sheet_url')")

@@ -181,7 +181,11 @@ def opponent_scout(reports, player, agg, community=None, meta=None, min_matches=
     out = []
     for opp, match_lists in sorted(decks.items(), key=lambda z: -len(z[1])):
         n = len(match_lists)
-        if n < min_matches:
+        w, l = rivals.get(opp, (0, 0))
+        losing = l > w and (w + l) >= 1        # you're sub-.500 against them
+        # Normally we need >=min_matches meetings to read a shuffle. But a rival you're LOSING to
+        # is worth surfacing even off a single meeting — you still want to prep for the rematch.
+        if n < min_matches and not losing:
             continue
         combo_jac = _avg_jaccard([set(c) for c in match_lists]) or 0
         blade_jac = _avg_jaccard([{_blade(c) for c in cl} for cl in match_lists]) or 0
@@ -213,12 +217,15 @@ def opponent_scout(reports, player, agg, community=None, meta=None, min_matches=
             mstyle = _meta_style(set(comm_deck), meta) or mstyle
 
         pred_label, pred_color = _pred_tier(pred)
-        w, l = rivals.get(opp, (0, 0))
         out.append({"opponent": opp, "matches": n, "record": f"{w}-{l}",
+                    "wins": w, "losses": l, "losing": losing,
+                    "threat_tag": (f"you're down {w}-{l}" if losing else None),
                     "predictability": pred, "pred_label": pred_label, "pred_color": pred_color,
                     "meta_style": mstyle, "watch": _watch(pred, pred_label, mstyle),
                     "source": source, "readout": readout, "answers": answers,
                     "decks_faced": _unique_decks(match_lists)})
+    # rivals you're LOSING to float to the top (worst margin first), then most-faced.
+    out.sort(key=lambda o: (0 if o["losing"] else 1, -(o["losses"] - o["wins"]), -o["matches"]))
     return out
 
 
@@ -294,8 +301,11 @@ def to_txt(p):
     for s in sc:
         pr = f"{s['predictability']}%" if s["predictability"] is not None else "known"
         mtag = f" · {s['meta_style']['tag']} ({s['meta_style']['pct']}%)" if s.get("meta_style") else ""
-        L.append(f"  {s['opponent']} — you {s['record']} / {s['matches']} matches · "
-                 f"[{s['pred_label']} {pr}]{mtag}")
+        threat = f" ⚠ {s['threat_tag']}" if s.get("threat_tag") else ""
+        meet = max(s["matches"], s["wins"] + s["losses"])
+        dn = f", {s['matches']} w/ deck data" if s["matches"] < meet else ""
+        L.append(f"  {s['opponent']} — you {s['record']} ({meet} seen{dn}) · "
+                 f"[{s['pred_label']} {pr}]{mtag}{threat}")
         if not s["readout"]:
             L.append("     ??? ??? ???")
             for i, d in enumerate(s["decks_faced"], 1):
@@ -310,7 +320,7 @@ def to_txt(p):
         if s["source"] != "your matches":
             L.append(f"     [source: {s['source']}]")
     if not sc:
-        L.append("  (no opponent faced 2+ times with combo data yet — feed more reports)")
+        L.append("  (no rival to scout yet — nobody faced 2+ times, and none you're losing to — feed more reports)")
 
     sr = p.get("self_read") or {}
     L.append("\nHOW YOU'RE READ — your tendencies (self-scout)")
@@ -352,7 +362,9 @@ def to_html(p, theme):
 
     sc = p.get("scouting") or []
     bd = ' <span class="tag">community mode</span>' if p.get("backdoor") else ""
-    cards = ""
+    # Rivals you've met 2+ times get full cards; those faced only once are tucked into an
+    # expandable so the report isn't over-populated with low-confidence one-offs.
+    main_cards, once_cards, once_n = "", "", 0
     for s in sc:
         pr = f"{s['predictability']}%" if s["predictability"] is not None else "known"
         box = (f'<span style="background:{s["pred_color"]};color:#0a0a0a;border-radius:6px;'
@@ -362,7 +374,11 @@ def to_html(p, theme):
             mc = {"meta": orange, "anti-meta": green, "mixed": muted}.get(s["meta_style"]["tag"], muted)
             mtag = f' <span class="tag" style="border-color:{mc};color:{mc}">{e(s["meta_style"]["tag"])} {s["meta_style"]["pct"]}%</span>'
         head = (f'<b>{e(s["opponent"])}</b> {box}{mtag} '
-                f'<span class="sub">— you {e(s["record"])} / {s["matches"]} matches</span>')
+                f'<span class="sub">— you {e(s["record"])} ({max(s["matches"], s["wins"]+s["losses"])} seen'
+                f'{(", " + str(s["matches"]) + " w/ deck data") if s["matches"] < s["wins"]+s["losses"] else ""})</span>')
+        if s.get("threat_tag"):
+            head += (f' <span class="tag" style="border-color:{red};color:{red};font-weight:700">'
+                     f'⚠ {e(s["threat_tag"])}</span>')
         decks = s["decks_faced"]
         popup_rows = "".join(
             f'<div class="sub">deck {i}{(" (seen " + str(d["times"]) + "x)") if d["times"] > 1 else ""}: {e(" · ".join(d["combos"]))}</div>'
@@ -378,13 +394,27 @@ def to_html(p, theme):
                           for a in s["answers"])
         watch = "".join(f'<div class="nudge">▲ {e(w)}</div>' for w in s.get("watch", []))
         src = f'<div class="sub" style="color:{muted}">source: {e(s["source"])}</div>' if s["source"] != "your matches" else ""
-        cards += f'<div class="card">{head}{body}{answers}{watch}{src}</div>'
+        card = f'<div class="card">{head}{body}{answers}{watch}{src}</div>'
+        if max(s["matches"], s["wins"] + s["losses"]) <= 1:
+            once_cards += card; once_n += 1
+        else:
+            main_cards += card
+    once_block = ""
+    if once_cards:
+        once_block = (f'<details style="margin-top:12px"><summary style="cursor:pointer;color:{muted}">'
+                      f'▸ {once_n} rival{"s" if once_n != 1 else ""} faced only once '
+                      f'(low-confidence — click to view)</summary>'
+                      f'<div style="margin-top:8px">{once_cards}</div></details>')
     legend = ('<div class="sub" style="margin-bottom:8px">How to read: the colored box is '
               '<b>predictability</b> (green = same deck every time → readable, yellow = keeps a core but '
               'flexes, red = unpredictable). <b>meta / anti-meta</b> = how much of their kit is in the current '
-              'field meta. Combos with a % = how often they bring it; no % = every match. Click '
-              '<i>decks faced</i> for their distinct decks (same combos in a different order count as one).</div>')
-    scouting_html = f'<h2>Rival scouting — shuffle prediction{bd}</h2>' + legend + (cards or '<div class="sub">No opponent faced 2+ times yet.</div>')
+              'field meta. A red <b>⚠ you\'re down</b> badge = a rival you\'re losing to (these sort to the top). '
+              'Rivals faced only once are tucked into the expandable at the bottom. Combos with a % = how often '
+              'they bring it; no % = every match. Click <i>decks faced</i> for their distinct decks (same combos '
+              'in a different order count as one).</div>')
+    body_html = main_cards or ('<div class="sub">No rival faced 2+ times yet'
+                               + (' — see the one-off meetings below.' if once_block else '. Feed more reports.') + '</div>')
+    scouting_html = f'<h2>Rival scouting — shuffle prediction{bd}</h2>' + legend + body_html + once_block
 
     sr = p.get("self_read") or {}
     rows = "".join(f'<tr><td>{e(b["blade"])}</td><td style="text-align:right">{b["pct"]}%</td>'

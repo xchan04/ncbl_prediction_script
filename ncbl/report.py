@@ -103,7 +103,11 @@ def to_txt(d):
     for s in d["standings"]:
         mark = "  <= " + d["player"] if s["player"] == d["player"] else ""
         L.append(f"  {s['rank']:>3}  {s['player']:20}{s['score']:8.3f}  {s['events']} ev{mark}")
-    return "\n".join(L) + "\n"
+    out = "\n".join(L) + "\n"
+    if d.get("ai_plan"):
+        from . import ai_layer as _AI
+        out += _AI.plan_to_txt(d["ai_plan"])
+    return out
 
 
 def to_json(d):
@@ -165,6 +169,11 @@ def to_html(d, cfg):
             f'<td style="text-align:right">{s["events"]}</td></tr>'
         )
 
+    ai_html = ""
+    if d.get("ai_plan"):
+        from . import ai_layer as _AI
+        ai_html = _AI.plan_to_html(d["ai_plan"], th)
+
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{e(d['player'])} — NCBL report</title>
 <style>
@@ -179,6 +188,9 @@ def to_html(d, cfg):
   th,td{{padding:7px 10px;border-bottom:1px solid {border}}}
   th{{color:{muted};text-align:left;font-weight:600}}
   .cols{{display:flex;gap:24px;flex-wrap:wrap}} .cols>div{{flex:1;min-width:300px}}
+  .pill{{color:{orange};border:1px solid {orange};border-radius:8px;padding:1px 8px;font-size:12px}}
+  .ai{{border-left:3px solid {orange};background:#140d05;padding:10px 16px;margin:8px 0;border-radius:0 8px 8px 0;font-size:14px}}
+  .ai h3{{color:#ffb454;font-size:15px;border:0;margin:12px 0 4px}} .ai h4{{color:#ffb454;font-size:13px;margin:8px 0 2px}} .ai li{{margin:2px 0}} .ai .row{{margin:4px 0}}
   .foot{{color:{muted};font-size:12px;margin-top:30px}}
 </style></head><body><div class="wrap">
   <h1>{e(d['player'])}</h1>
@@ -187,6 +199,8 @@ def to_html(d, cfg):
     <span class="sub">Target: Top {d['target_rank']} &nbsp;·&nbsp; cutoff now = {d['cutoff']}
     &nbsp;·&nbsp; field = {d['field_size']} ranked players{f" &nbsp;·&nbsp; {stage} open invitational spots" if stage else ""}</span>
   </div>
+
+  {ai_html}
 
   <h2>What it takes</h2>
   <table><thead><tr><th>Strategy</th><th style="text-align:right">Total</th>

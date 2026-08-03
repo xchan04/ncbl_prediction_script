@@ -320,6 +320,32 @@ def goal_card(reports, player, agg, weaknesses, rec, benchmarks):
             "trajectory": trajectory, "objectives": objectives[:3]}
 
 
+def _recent_form(mine, opp, keep=6):
+    """Chronological set results vs one opponent -> recent form, current streak, last meeting.
+    Sets are ordered by event date, then their order within the match recap."""
+    seq = []
+    for r in mine:
+        d = _date_iso(r.get("date"))
+        for i, mt in enumerate(r.get("matches", [])):
+            if mt.get("opponent") == opp:
+                seq.append((d or "9999-99-99", i, mt.get("result")))
+    if not seq:
+        return None
+    seq.sort(key=lambda z: (z[0], z[1]))
+    results = [s[2] for s in seq]
+    last = results[-1]
+    streak = 0
+    for r in reversed(results):
+        if r == last:
+            streak += 1
+        else:
+            break
+    form = "-".join("W" if r == "WIN" else "L" for r in results[-keep:])
+    last_seen = next((s[0] for s in reversed(seq) if s[0] != "9999-99-99"), None)
+    return {"form": form, "streak": streak, "streak_kind": "W" if last == "WIN" else "L",
+            "last_seen": last_seen, "sets": len(results)}
+
+
 def nemesis_dossier(reports, player, rivals):
     """For each nemesis (a player you're sub-.500 against over >=2 sets), the combos they
     beat you with and your record vs each — a focused scouting card built from match recaps."""
@@ -339,7 +365,8 @@ def nemesis_dossier(reports, player, rivals):
         rows = sorted(({"combo": c, "record": f"{w}-{l}", "wins": w, "losses": l, "btl": w + l}
                        for c, (w, l) in combos.items()), key=lambda z: (z["losses"] - z["wins"], z["btl"]), reverse=True)
         dossier.append({"player": rv["player"], "record": f"{rv['wins']}-{rv['losses']}",
-                        "win_pct": rv["win_pct"], "played": rv["played"], "combos": rows[:4]})
+                        "win_pct": rv["win_pct"], "played": rv["played"], "combos": rows[:4],
+                        "recent": _recent_form(mine, rv["player"])})
     return dossier
 
 
@@ -403,7 +430,7 @@ def _conf(n, hi, mid):
 
 # ---------------- analysis ----------------
 def coach(reports, player, scope="lifetime", meta_report=None, community=None,
-          events_attended=None, h2h_extra=None):
+          events_attended=None, h2h_extra=None, parts_db=None):
     player = _resolve(reports, player)
     agg = aggregate(reports, player)
     meta = build_meta(reports)
@@ -542,7 +569,7 @@ def coach(reports, player, scope="lifetime", meta_report=None, community=None,
     field = field_benchmark(reports, player, agg)
     prediction = PRED.build(reports, player, agg, meta=meta_report, community=community)
 
-    return {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
+    res = {"player": agg["player"], "scope": scope, "events": agg["events"], "n_events": agg["n_events"],
             "confidence": conf, "style": agg["style"], "archetype": (agg["archetypes"] or [None])[0],
             "combos": agg["combos"], "loss_finishes": agg["loss_finishes"],
             "weaknesses": weaknesses, "strengths": strengths, "swaps": swaps, "meta": meta_notes,
@@ -551,7 +578,17 @@ def coach(reports, player, scope="lifetime", meta_report=None, community=None,
             "benchmarks": benchmarks, "community": {"n_players": comm["n_players"]},
             "goal": goal, "nemeses": nemeses, "field": field, "prediction": prediction,
             "matchups_opp": {f"{k}": v for k, v in agg["matchups_opp"].items()},
-            "opp_players": agg["opp_players"]}
+            "opp_players": agg["opp_players"],
+            # grounded coaching is attached afterwards: it reads the finished result
+            "grounded": None}
+
+    if parts_db:
+        try:
+            from . import grounded as _G
+            res["grounded"] = _G.build(res, parts_db)
+        except Exception as ex:               # never let the parts layer break the report
+            res["grounded"] = {"error": f"{type(ex).__name__}: {ex}"}
+    return res
 
 
 def _finish_advice(t):
@@ -718,11 +755,18 @@ def _next_tier(conf):
     return "you're at the highest confidence tier"
 
 
+def _style_str(style):
+    """Readable style fingerprint: axes high->low, e.g. 'Efficiency 84, Closer 81, ...' (no raw dict)."""
+    if not style:
+        return "—"
+    return ", ".join(f"{k} {v}" for k, v in sorted(style.items(), key=lambda z: -z[1]))
+
+
 def coach_txt(d):
     c = d["confidence"]
     L = [f"{d['player']} — coaching report  [scope: {d.get('scope','lifetime')}]",
          f"{_events_str(c)} · {c['battles']} battles · confidence: {c['tier']}",
-         f"archetype: {d.get('archetype')}  style: {d.get('style')}",
+         f"archetype: {d.get('archetype')}  ·  style: {_style_str(d.get('style'))}",
          f"({_coverage_note(c)})", ""]
     g = d.get("goal") or {}
     if g:
@@ -753,6 +797,9 @@ def coach_txt(d):
         L.append("  unanswered meta: " + ", ".join(f"{g['opp']} ({g['record']})" for g in rec["gaps"]))
     if rec.get("note"):
         L.append(f"  note: {rec['note']}")
+    _airec = d.get("ai_reconcile") or {}
+    if _airec.get("recommendation_note"):
+        L.append(f"  note (AI): {_airec['recommendation_note']}")
     L.append("")
     L.append("STRENGTHS")
     for s in d["strengths"]:
@@ -795,7 +842,12 @@ def coach_txt(d):
         L.append("  (no match-recap data in these reports)")
     L.append("\nNEMESIS DOSSIER — who beats you and with what")
     for n in d.get("nemeses", []):
-        L.append(f"  {n['player']} (you {n['record']}, {n['win_pct']}% over {n['played']} sets)")
+        rc = n.get("recent")
+        streak = ""
+        if rc and rc["streak"] >= 2:
+            streak = f" · {'LOST' if rc['streak_kind']=='L' else 'won'} last {rc['streak']}"
+        form = f" · form {rc['form']}" + (f" (last seen {rc['last_seen']})" if rc and rc.get("last_seen") else "") if rc else ""
+        L.append(f"  {n['player']} (you {n['record']}, {n['win_pct']}% over {n['played']} sets){streak}{form}")
         for cb in n["combos"]:
             L.append(f"     {cb['combo']:32} you {cb['record']}")
     if not d.get("nemeses"):
@@ -811,9 +863,41 @@ def coach_txt(d):
         L.append("  (no shared-combo peer data in these reports)")
     if d.get("prediction"):
         L.append(PRED.to_txt(d["prediction"]))
-    if d.get("ai_notes"):
+    g = d.get("grounded")
+    if g and not g.get("error"):
+        L.append("\nGROUNDED COACHING — advice limited to parts you own")
+        inv = g["inventory"]
+        L.append("  your parts: " + ", ".join(f"{k} ({v}btl)" for k, v in
+                 sorted(inv["blades"].items(), key=lambda z: -z[1])))
+        land = g["landscape"]
+        L.append(f"  field you face: spin {land['spin_mix']} · roles {land['role_mix']} "
+                 f"({land['n_distinct']} distinct combos)")
+        ma = g.get("meta_alignment") or {}
+        if ma.get("verdict"):
+            L.append(f"  meta: {ma['verdict']}")
+        if g.get("gaps"):
+            L.append("  deck gaps:")
+            for x in g["gaps"]:
+                f = x.get("fill") or {}
+                L.append(f"    [{x['severity']}] {x['text']}")
+                L.append(f"        why: {x['why']}")
+                tier = f.get("tier")
+                if tier == "proven":
+                    L.append(f"        -> PROVEN: {f['combo']} — {f['note']}")
+                elif tier == "buildable":
+                    L.append(f"        -> BUILDABLE (untested): {f['combo']} — {f['note']}")
+                elif tier == "acquire":
+                    L.append(f"        -> ACQUIRE: {f['note']}")
+                else:
+                    L.append(f"        -> {f.get('note', 'no owned answer')}")
+        skills = g.get("skill_gaps") or []
+        if skills:
+            L.append("  part issue vs skill gap:")
+            for s in skills:
+                L.append(f"    {s['combo']}: {s['verdict'].upper()} — {s['reasons'][0]}")
+    if d.get("ai_notes") or d.get("ai_reconcile"):
         from . import ai_layer as _AI
-        L.append(_AI.to_txt(d["ai_notes"]))
+        L.append(_AI.to_txt(d.get("ai_notes", ""), d.get("ai_reconcile")))
     return "\n".join(L) + "\n"
 
 
@@ -910,6 +994,10 @@ def coach_html(d, cfg, image_path=None):
         rec_extra += f'<div class="sub" style="color:{red}">Unanswered meta: ' + ", ".join(f'{e(g["opp"])} ({g["record"]})' for g in rec["gaps"]) + '</div>'
     if rec.get("note"):
         rec_extra += f'<div class="nudge">{e(rec["note"])}</div>'
+    _airec = d.get("ai_reconcile") or {}
+    if _airec.get("recommendation_note"):
+        rec_extra += (f'<div class="nudge" style="border-left:3px solid {orange};padding-left:8px">'
+                      f'<b>AI:</b> {e(_airec["recommendation_note"])}</div>')
     recommendation = f'<h2>Recommended next-tournament deck</h2>{deck_rows}{rec_extra}'
 
     # rivals (head-to-head vs players), nemeses highlighted
@@ -926,8 +1014,20 @@ def coach_html(d, cfg, image_path=None):
         rows = "".join(f'<tr><td>{e(cb["combo"])}</td>'
                        f'<td style="text-align:right;color:{red}">{e(cb["record"])}</td></tr>'
                        for cb in n["combos"]) or f'<tr><td colspan="2" style="color:{muted}">combos not itemized</td></tr>'
-        return (f'<div class="card"><b style="color:{red}">{e(n["player"])}</b> '
+        rc = n.get("recent")
+        streak_html = ""
+        if rc and rc["streak"] >= 2:
+            col = red if rc["streak_kind"] == "L" else green
+            verb = "LOST" if rc["streak_kind"] == "L" else "won"
+            streak_html = (f' <span class="tag" style="border-color:{col};color:{col};font-weight:700">'
+                           f'{verb} last {rc["streak"]}</span>')
+        form_html = ""
+        if rc and rc.get("form"):
+            seen = f' · last seen {e(rc["last_seen"])}' if rc.get("last_seen") else ""
+            form_html = f'<div class="sub" style="color:{muted}">recent form: {e(rc["form"])}{seen}</div>'
+        return (f'<div class="card"><b style="color:{red}">{e(n["player"])}</b>{streak_html} '
                 f'<span class="sub">— you {e(n["record"])} ({n["win_pct"]}% over {n["played"]} sets)</span>'
+                f'{form_html}'
                 f'<table style="margin-top:8px"><thead><tr><th>Their build</th>'
                 f'<th style="text-align:right">Your record</th></tr></thead><tbody>{rows}</tbody></table></div>')
     nemeses_html = ("<h2>Nemesis dossier</h2>" + "".join(nem_card(n) for n in d["nemeses"])
@@ -954,15 +1054,77 @@ def coach_html(d, cfg, image_path=None):
         field_html = '<h2>Field benchmark</h2><div class="sub">No shared-combo peer data in these reports.</div>'
 
     prediction_html = PRED.to_html(d["prediction"], th) if d.get("prediction") else ""
+
+    # grounded coaching — every fill tagged by whether the player owns the hardware
+    grounded_html = ""
+    g = d.get("grounded")
+    if g and not g.get("error"):
+        inv = g["inventory"]; land = g["landscape"]
+        chips = " ".join(f'<span class="tag">{e(k)} <span style="color:{muted}">{v}</span></span>'
+                         for k, v in sorted(inv["blades"].items(), key=lambda z: -z[1]))
+        bchips = " ".join(f'<span class="tag">{e(k)} <span style="color:{muted}">{v}</span></span>'
+                          for k, v in sorted(inv["bits"].items(), key=lambda z: -z[1]))
+        lrows = "".join(
+            f'<tr><td>{e(r["combo"])}</td><td style="text-align:right">{r["times_seen"]}</td>'
+            f'<td style="text-align:right;color:{red if r["losing"] else green}">{e(str(r["record"] or "—"))}</td>'
+            f'<td style="text-align:center;color:{muted}">{e(str(r["spin"] or "?"))}</td>'
+            f'<td style="color:{muted}">{e(", ".join(r["roles"]))}</td></tr>'
+            for r in land["combos"][:8])
+        TIER = {"proven": (green, "PROVEN — you already run this"),
+                "buildable": (orange, "BUILDABLE — you own the parts, untested"),
+                "acquire": (red, "ACQUIRE — not in your parts pool"),
+                "none": (red, "NO OWNED ANSWER")}
+        gap_rows = ""
+        for x in g.get("gaps", []):
+            f = x.get("fill") or {}
+            col, lbl = TIER.get(f.get("tier"), (muted, "—"))
+            fill = (f'<div class="sub"><span class="tag" style="border-color:{col};color:{col}">{lbl}</span> '
+                    + (f'<b>{e(f["combo"])}</b> — ' if f.get("combo") else "")
+                    + f'{e(f.get("note", ""))}</div>')
+            gap_rows += (f'<div class="card"><b>{e(x["text"])}</b> '
+                         f'<span class="tag">{e(x["severity"])}</span>'
+                         f'<div class="sub">{e(x["why"])}</div>{fill}</div>')
+        ma = g.get("meta_alignment") or {}
+        grounded_html = (
+            f'<h2>Grounded coaching <span class="pill">owned-parts only</span></h2>'
+            f'<div class="sub">{e(g.get("policy", ""))}</div>'
+            f'<div class="sub" style="margin-top:8px"><b>Your blades:</b> {chips}</div>'
+            f'<div class="sub"><b>Your bits:</b> {bchips}</div>'
+            f'<h3 style="color:{orange};font-size:15px;margin:18px 0 6px">The field you actually face</h3>'
+            f'<div class="sub">spin mix {e(str(land["spin_mix"]))} · roles {e(str(land["role_mix"]))} · '
+            f'{land["n_distinct"]} distinct combos seen</div>'
+            f'<table style="margin-top:6px"><thead><tr><th>Opponent combo</th>'
+            f'<th style="text-align:right">Seen</th><th style="text-align:right">Your record</th>'
+            f'<th style="text-align:center">Spin</th><th>Roles</th></tr></thead><tbody>{lrows}</tbody></table>'
+            + (f'<div class="nudge" style="margin-top:10px">{e(ma.get("verdict", ""))}</div>' if ma.get("verdict") else "")
+            + (f'<h3 style="color:{orange};font-size:15px;margin:18px 0 6px">Deck gaps &amp; what fills them</h3>{gap_rows}'
+               if gap_rows else ""))
+
     ai_html = ""
-    if d.get("ai_notes"):
+    _calls, _call_th = {}, ""
+    if d.get("ai_notes") or d.get("ai_reconcile"):
         from . import ai_layer as _AI
-        ai_html = _AI.to_html(d["ai_notes"], th)
+        ai_html = _AI.to_html(d.get("ai_notes", ""), th, d.get("ai_reconcile"))
+        _calls = _AI.combo_call_map(d.get("ai_reconcile"))
+
+        def _call_cell(name):
+            ci = _calls.get(_AI._norm_combo(name))
+            if not ci or not ci.get("call"):
+                return "<td></td>"
+            col = _AI.CALL_COLORS.get(ci["call"], muted)
+            return (f'<td style="text-align:center"><span class="tag" title="{e(ci.get("why",""))}" '
+                    f'style="border-color:{col};color:{col}">{e(ci["call"].upper())}</span></td>')
+        if _calls:
+            _call_th = '<th style="text-align:center">AI call</th>'
+    else:
+        def _call_cell(name):
+            return ""
 
     combos = "".join(
         f'<tr><td>{e(n)}</td><td style="text-align:center">{e(str(c.get("tier") or "?"))}</td>'
         f'<td style="text-align:right">{c["win_pct"]}%</td><td style="text-align:right">{c["ppb"]:+}</td>'
-        f'<td style="text-align:right">{c["battles"]}</td><td style="text-align:center;color:{muted}">{c.get("trend") or ""}</td></tr>'
+        f'<td style="text-align:right">{c["battles"]}</td><td style="text-align:center;color:{muted}">{c.get("trend") or ""}</td>'
+        f'{_call_cell(n)}</tr>'
         for n, c in sorted(d["combos"].items(), key=lambda z: -z[1]["ppb"]))
     c = d["confidence"]
     scope = d.get("scope", "lifetime")
@@ -994,7 +1156,7 @@ def coach_html(d, cfg, image_path=None):
  <h1>{e(d['player'])} <span class="pill">{e(scope)}</span></h1>
  <div class="card"><span class="big">{_events_str(c)} · {c['battles']} battles · confidence
    <b style="color:{orange}">{c['tier']}</b></span><br>
-   <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(str(d.get('style')))}</span>
+   <span class="sub">archetype: {e(str(d.get('archetype')))} · style {e(_style_str(d.get('style')))}</span>
    <div class="nudge">▲ {e(_coverage_note(c))}</div></div>
  {goal_html}
  {ai_html}
@@ -1007,12 +1169,13 @@ def coach_html(d, cfg, image_path=None):
    <tbody>{rival_rows}</tbody></table>
  {nemeses_html}
  {prediction_html}
+ {grounded_html}
  {meta}
  {field_html}
  {img_html}
  <h2>Your combos (all events)</h2>
  <table><thead><tr><th>Combo</th><th style="text-align:center">Tier</th><th style="text-align:right">Win%</th>
-   <th style="text-align:right">PPB</th><th style="text-align:right">Btl</th><th style="text-align:center">Trend</th></tr></thead>
+   <th style="text-align:right">PPB</th><th style="text-align:right">Btl</th><th style="text-align:center">Trend</th>{_call_th}</tr></thead>
    <tbody>{combos}</tbody></table>
  <div class="sub" style="margin-top:24px">NCBLAST coaching · data-driven, no AI · more reports = more confidence</div>
 </div></body></html>"""

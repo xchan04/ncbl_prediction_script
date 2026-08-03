@@ -314,6 +314,9 @@ def _compact_combat(res):
         "strengths": [s.get("text") for s in res.get("strengths", [])][:4],
         "loss_finishes": res.get("loss_finishes"),
         "recommended_deck": [x.get("combo") for x in rec.get("deck", [])],
+        # why a stronger combo is NOT in the deck — without this the battle plan recommends
+        # e.g. Cobalt 9-60 while the coaching report correctly runs 5-60, and they contradict
+        "deck_part_conflicts": rec.get("part_conflicts"),
         "nemeses": [{"opp": n.get("player"), "record": n.get("record"),
                      "recent": (n.get("recent") or {}).get("form")} for n in res.get("nemeses", [])],
         "spin_analysis": spin_note,

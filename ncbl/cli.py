@@ -141,7 +141,20 @@ def cmd_report(args):
                 if meta_path:
                     with open(meta_path, encoding="utf-8") as fh:
                         meta_report = json.load(fh)
-                cres = CO.coach(reps, player, scope=args.season or "lifetime", meta_report=meta_report)
+                # Load the parts DB too, so the combat profile carries spin direction — without
+                # it the battle plan cannot see that the field is one-spin-heavy and says
+                # "no spin-mix data provided".
+                pdb = None
+                pdb_path = (getattr(args, "parts_db", None)
+                            or os.path.join(cfg.get("meta_dir") or "meta", "parts_db.json"))
+                if os.path.exists(pdb_path):
+                    try:
+                        with open(pdb_path, encoding="utf-8") as fh:
+                            pdb = json.load(fh)
+                    except Exception:
+                        pdb = None
+                cres = CO.coach(reps, player, scope=args.season or "lifetime",
+                                meta_report=meta_report, parts_db=pdb)
                 combat = AI._compact_combat(cres)
         except Exception as ex:
             print(f"(combat profile for the battle plan skipped: {ex})")

@@ -25,6 +25,22 @@ def _pages_text(path):
     return out
 
 
+def _pages_words(path):
+    """Per page, the list of words with x/y positions. Needed for multi-column sections
+    whose reading order is scrambled by plain text extraction."""
+    import pdfplumber
+    import logging
+    logging.getLogger("pdfminer").setLevel(logging.ERROR)
+    out = []
+    with pdfplumber.open(path) as pdf:
+        for pg in pdf.pages:
+            try:
+                out.append(pg.extract_words() or [])
+            except Exception:
+                out.append([])
+    return out
+
+
 def parse(path):
     pages = _pages_text(path)
     full = "\n".join(pages)
@@ -46,6 +62,7 @@ def parse(path):
         "archetype": _archetype(lines),
         "matches": _matches(lines),
         "dynamics": _dynamics(full),
+        "combo_finishes": _combo_finishes(path, pages),
     }
     # attach tier onto each combo by index/name
     for c in rep["combos"]:
@@ -284,6 +301,98 @@ def _matches(lines):
             pending_opp = o.group(1).strip()
     return out
 
+
+
+# ---------------- per-combo finish breakdown (§03, "Combo Finish Breakdown") ----------------
+def _combo_finishes(path, pages):
+    """How each top combo wins and loses, by finish type.
+
+    The section is a 3-column layout; plain text extraction interleaves the columns and
+    loses which entry belongs to which combo. So we work from word x-positions: the
+    "SCORED" markers give the column left edges, every word is assigned to the nearest
+    column, and each column is then read top-to-bottom on its own.
+
+    The page prints "SCORED n" / "ALLOWED n" totals, so we use them as a checksum: a
+    column whose parsed counts do not sum to the declared totals is dropped rather than
+    reported wrong.
+
+    -> {combo: {"scored": {finish: {count, pct}}, "allowed": {...},
+                "scored_total": n, "allowed_total": n}}
+    """
+    idx = next((i for i, t in enumerate(pages) if "Combo Finish Breakdown" in (t or "")), None)
+    if idx is None:
+        return {}
+    try:
+        words = _pages_words(path)[idx]
+    except Exception:
+        return {}
+    if not words:
+        return {}
+
+    edges = sorted({round(w["x0"]) for w in words if w["text"].strip() == "SCORED"})
+    if not edges:
+        return {}
+
+    def col_of(x):
+        # a column OWNS everything from its left edge up to the next column's edge —
+        # entry labels and their values sit at different x within the same column, so a
+        # midpoint boundary would split each entry in half.
+        c = 0
+        for i, e in enumerate(edges):
+            if x >= e - 12:          # small tolerance: headings can start just left of SCORED
+                c = i
+        return c
+
+    # rebuild each column's lines: group words by rounded vertical position
+    cols = {}
+    for w in words:
+        rows = cols.setdefault(col_of(w["x0"]), {})
+        rows.setdefault(round(w["top"] / 3), []).append(w)
+    lines_by_col = {}
+    for c, rows in cols.items():
+        lines_by_col[c] = [" ".join(x["text"] for x in sorted(v, key=lambda z: z["x0"]))
+                           for _, v in sorted(rows.items())]
+
+    # "Own (self-KO)" is a LOSS (you knocked yourself out); "Own (opp KO)" is a WIN the
+    # opponent handed you by self-KO. Both appear, so match any Own (...) label.
+    ENTRY = re.compile(r"^(Own \([^)]+\)|Opp (?:Xtreme|Over|Spin|Burst)|Xtreme|Over|Spin|Burst)"
+                       r"\s+(\d+)\s*[·\u00b7]\s*([\d.]+)\s*%$")
+    out = {}
+    for c in sorted(lines_by_col):
+        lines = lines_by_col[c]
+        name, sc_tot, al_tot = None, None, None
+        scored, allowed, bucket = {}, {}, None
+        for ln in lines:
+            t = ln.strip()
+            if not t or t.startswith("COMBO"):
+                continue
+            m = re.match(r"^SCORED\s+(\d+)$", t)
+            if m:
+                sc_tot = int(m.group(1)); bucket = "s"; continue
+            m = re.match(r"^ALLOWED\s+(\d+)$", t)
+            if m:
+                al_tot = int(m.group(1)); bucket = "a"; continue
+            m = ENTRY.match(t)
+            if m and bucket:
+                rec = {"count": int(m.group(2)), "pct": float(m.group(3))}
+                (scored if bucket == "s" else allowed)[m.group(1)] = rec
+                continue
+            # the first non-marker line in the column is the combo name
+            if name is None and _looks_like_combo(t):
+                name = _norm(t)
+        if not name or sc_tot is None or al_tot is None:
+            continue
+        # checksum — drop the column rather than report wrong numbers
+        if sum(v["count"] for v in scored.values()) != sc_tot:
+            continue
+        if sum(v["count"] for v in allowed.values()) != al_tot:
+            continue
+        out[name] = {"scored": scored, "allowed": allowed,
+                     "scored_total": sc_tot, "allowed_total": al_tot,
+                     # points the opponent gave away rather than points you earned
+                     "gifted": sum(v["count"] for k, v in scored.items() if k.startswith("Own (")),
+                     "self_ko": sum(v["count"] for k, v in allowed.items() if k.startswith("Own ("))}
+    return out
 
 
 # ---------------- battle dynamics (side split + points distribution) ----------------
